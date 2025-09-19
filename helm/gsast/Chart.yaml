@@ -1,0 +1,14 @@
+apiVersion: v2
+appVersion: "0.1.0"
+description: A Helm chart for Kubernetes to run sast scan across many GitLab projects
+name: gsast
+version: 1.0.0
+maintainers:
+  - name: Global SAST Scanner Contributors
+    url: https://github.com/your-org/global-sast-scan
+
+dependencies:
+  - name: redis
+    version: "18.1.5"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled

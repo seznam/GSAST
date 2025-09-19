@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  gsast-api:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - GITHUB_API_TOKEN=${GITHUB_API_TOKEN}
+      - GITLAB_API_TOKEN=${GITLAB_API_TOKEN}
+      - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
+      - API_SECRET_KEY=${API_SECRET_KEY:-dev-secret-key-change-in-production}
+      - FLASK_ENV=${FLASK_ENV:-development}
+      - PYTHONPATH=/app
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./rules:/app/rules:ro
+      - ./gsast:/app/gsast:ro
+      - scan_results:/app/results
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"] 
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  gsast-worker:
+    build: .
+    command: python worker.py
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - GITHUB_API_TOKEN=${GITHUB_API_TOKEN}
+      - GITLAB_API_TOKEN=${GITLAB_API_TOKEN}
+      - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
+      - API_SECRET_KEY=${API_SECRET_KEY:-dev-secret-key-change-in-production}
+      - PYTHONPATH=/app
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./gsast:/app/gsast:ro
+      - scan_results:/app/results
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # For potential container scanning
+    restart: unless-stopped
+    deploy:
+      replicas: 2  # Run 2 worker instances
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis; r=redis.from_url('redis://redis:6379'); r.ping()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  redis_data:
+  scan_results:
+
+# For production, consider adding:
+# networks:
+#   gsast_network:
+#     driver: bridge

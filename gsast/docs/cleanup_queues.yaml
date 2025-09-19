@@ -1,0 +1,56 @@
+summary: "Clean up scan queues"
+description: |
+  Cleans up all scan-related queues and cached data. This operation removes:
+  - All scan status information
+  - All task queue entries  
+  - All uploaded rule files
+  
+  Warning: This will also clear rule files stored in the rules cache.
+  
+  **Warning:** This is a destructive operation that will remove all scan history and queued tasks.
+  Use with caution in production environments.
+tags:
+  - "Maintenance"
+consumes:
+  - "application/json"
+produces:
+  - "application/json"
+security:
+  - ApiKeyAuth: []
+parameters:
+  - in: "header"
+    name: "API-SECRET-KEY"
+    type: "string"
+    required: true
+    description: "API secret key for authentication"
+responses:
+  200:
+    description: "Queues cleaned up successfully"
+    schema:
+      type: "object"
+      properties:
+        message:
+          type: "string"
+          example: "Scan queues cleaned up successfully"
+  403:
+    description: "Authentication failed"
+    schema:
+      type: "object"
+      properties:
+        error:
+          type: "string"
+          example: "Invalid API-SECRET-KEY"
+  500:
+    description: "Internal server error"
+    schema:
+      type: "object"
+      properties:
+        error:
+          type: "string"
+          example: "Failed to clean up queues"
+
+securityDefinitions:
+  ApiKeyAuth:
+    type: "apiKey"
+    in: "header"
+    name: "API-SECRET-KEY"

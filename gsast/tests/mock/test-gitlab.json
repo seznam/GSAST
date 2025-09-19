@@ -1,0 +1,29 @@
+{
+    "api_secret_key": "...",
+    "base_url": "https://gsast-server.example.com/",
+    "target": {
+        "provider": "gitlab",
+        "groups": [
+            "example-group"
+        ],
+        "repositories": [
+            "example-org/example-repo"
+        ]
+    },
+    "filters": {
+        "is_archived": false,
+        "is_fork": false,
+        "is_personal_project": false,
+        "max_repo_mb_size": 500,
+        "last_commit_max_age": 365,
+        "ignore_path_regexes": [
+            "test",
+            "mock",
+            "research"
+        ],
+        "must_path_regexes": []
+    },
+    "scanners": [
+        "semgrep"
+    ]
+} 

@@ -1,0 +1,200 @@
+summary: "Get scan results"
+description: |
+  Retrieves the results of a completed scan with optional filtering capabilities.
+  Results are returned in SARIF (Static Analysis Results Interchange Format) format.
+  
+  **Filtering Options:**
+  - **project**: Filter results to specific project name/URL
+  - **scan**: Filter results to specific scanner type (e.g., 'dependency-confusion', 'semgrep')  
+  - **query**: JSONPath query to extract specific data from SARIF results (returns raw matched values)
+  
+  **Examples:**
+  - `/scan/123/results` - Get all results
+  - `/scan/123/results?project=deepkeep` - Get results for deepkeep project only
+  - `/scan/123/results?scan=dependency-confusion` - Get only dependency confusion results
+  - `/scan/123/results?query=$..rules[?(@.properties.precision=="high")]` - Get high precision rules
+  - `/scan/123/results?query=$..results[?(@.level=="warning")]` - Get warning-level findings
+  - `/scan/123/results?query=$..results[*].ruleId` - Get all rule IDs
+  - `/scan/123/results?query=$..properties.tags` - Get all rule tags
+tags:
+  - "Scanning"
+produces:
+  - "application/json"
+security:
+  - ApiKeyAuth: []
+parameters:
+  - in: "header"
+    name: "API-SECRET-KEY"
+    type: "string"
+    required: true
+    description: "API secret key for authentication"
+  - in: "path"
+    name: "scan_id"
+    type: "string"
+    required: true
+    description: "Unique identifier for the scan"
+    example: "SCAN-2024-01-15-14-30-45"
+  - in: "query"
+    name: "project"
+    type: "string"
+    required: false
+    description: "Filter results to specific project name/URL"
+    example: "deepkeep"
+  - in: "query"
+    name: "scan"
+    type: "string"
+    required: false
+    description: "Filter results to specific scanner type"
+    enum: ["semgrep", "trufflehog", "dependency-confusion"]
+    example: "dependency-confusion"
+  - in: "query"
+    name: "query"
+    type: "string"
+    required: false
+    description: "JSONPath query to extract specific data from SARIF results (returns raw matched values)"
+    example: "$..rules[?(@.properties.precision==\"high\")]"
+responses:
+  200:
+    description: "Scan results retrieved successfully"
+    schema:
+      type: "object"
+      properties:
+        scan_id:
+          type: "string"
+          description: "Unique identifier for the scan"
+          example: "SCAN-2024-01-15-14-30-45"
+        projects:
+          type: "object"
+          description: "Results organized by project URL"
+          additionalProperties:
+            type: "object"
+            properties:
+              results:
+                type: "object"
+                description: "Scanner results organized by scanner type. When JSONPath query is used, contains raw matched values instead of full SARIF structure"
+                additionalProperties:
+                  description: "SARIF format results or raw matched values (when JSONPath query is applied)"
+                  properties:
+                    $schema:
+                      type: "string"
+                      description: "SARIF schema version"
+                      example: "https://docs.oasis-open.org/sarif/sarif/v2.1.0/os/schemas/sarif-schema-2.1.0.json"
+                    runs:
+                      type: "array"
+                      items:
+                        type: "object"
+                        properties:
+                          results:
+                            type: "array"
+                            items:
+                              type: "object"
+                              properties:
+                                level:
+                                  type: "string"
+                                  enum: ["error", "warning", "note"]
+                                  description: "Severity level of the finding"
+                                  example: "warning"
+                                locations:
+                                  type: "array"
+                                  items:
+                                    type: "object"
+                                    properties:
+                                      physicalLocation:
+                                        type: "object"
+                                        properties:
+                                          artifactLocation:
+                                            type: "object"
+                                            properties:
+                                              uri:
+                                                type: "string"
+                                                description: "File path relative to repository root"
+                                                example: "src/main.py"
+                                          region:
+                                            type: "object"
+                                            properties:
+                                              startLine:
+                                                type: "integer"
+                                                description: "Starting line number"
+                                                example: 42
+                                              endLine:
+                                                type: "integer"
+                                                description: "Ending line number"
+                                                example: 42
+                                              snippet:
+                                                type: "object"
+                                                properties:
+                                                  text:
+                                                    type: "string"
+                                                    description: "Code snippet"
+                                                    example: "dangerous_function()"
+                                message:
+                                  type: "object"
+                                  properties:
+                                    text:
+                                      type: "string"
+                                      description: "Human-readable description of the finding"
+                                      example: "Use of dangerous function detected"
+                                properties:
+                                  type: "object"
+                                  description: "Additional metadata about the finding"
+                                  properties:
+                                    absolutePath:
+                                      type: "string"
+                                      description: "Absolute path to the file"
+                                    relativePath:
+                                      type: "string"
+                                      description: "Relative path to the file"
+                                    language:
+                                      type: "string"
+                                      description: "Programming language"
+                                      example: "python"
+                                    scanType:
+                                      type: "string"
+                                      description: "Type of scan performed"
+                                ruleId:
+                                  type: "string"
+                                  description: "Identifier of the rule that triggered"
+                                  example: "DANGEROUS_FUNCTION_USAGE"
+        filters_applied:
+          type: "object"
+          description: "Information about filters that were applied (only present if filters were used)"
+          properties:
+            project:
+              type: "string"
+              description: "Project filter that was applied"
+            scanner:
+              type: "string"
+              description: "Scanner filter that was applied"
+            jsonpath_query:
+              type: "string"
+              description: "JSONPath query that was applied"
+  404:
+    description: "Scan results not found"
+    schema:
+      type: "object"
+      properties:
+        error:
+          type: "string"
+          example: "Scan results not found"
+  403:
+    description: "Authentication failed"
+    schema:
+      type: "object"
+      properties:
+        error:
+          type: "string"
+          example: "Invalid API-SECRET-KEY"
+  500:
+    description: "Internal server error"
+    schema:
+      type: "object"
+      properties:
+        error:
+          type: "string"
+          example: "Failed to retrieve scan results: Invalid JSONPath query"
+
+securityDefinitions:
+  ApiKeyAuth:
+    type: "apiKey"
+    in: "header"
+    name: "API-SECRET-KEY"

@@ -1,0 +1,55 @@
+summary: "Clean up projects cache"
+description: |
+  Cleans up the projects cache that stores repository information and metadata.
+  This operation removes:
+  - Cached repository listings
+  - Project metadata
+  - Repository API responses
+  
+  **Note:** This operation does not affect scan results or queued tasks.
+  The cache will be rebuilt automatically when new scans are initiated.
+tags:
+  - "Maintenance"
+consumes:
+  - "application/json"
+produces:
+  - "application/json"
+security:
+  - ApiKeyAuth: []
+parameters:
+  - in: "header"
+    name: "API-SECRET-KEY"
+    type: "string"
+    required: true
+    description: "API secret key for authentication"
+responses:
+  200:
+    description: "Projects cache cleaned up successfully"
+    schema:
+      type: "object"
+      properties:
+        message:
+          type: "string"
+          example: "Projects cache cleaned up successfully"
+  403:
+    description: "Authentication failed"
+    schema:
+      type: "object"
+      properties:
+        error:
+          type: "string"
+          example: "Invalid API-SECRET-KEY"
+  500:
+    description: "Internal server error"
+    schema:
+      type: "object"
+      properties:
+        error:
+          type: "string"
+          example: "Failed to clean up projects cache"
+
+securityDefinitions:
+  ApiKeyAuth:
+    type: "apiKey"
+    in: "header"
+    name: "API-SECRET-KEY"

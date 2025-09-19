@@ -1,0 +1,175 @@
+summary: "Start a new security scan"
+description: |
+  Initiates a new SAST (Static Application Security Testing) scan on specified repositories.
+  The scan supports multiple providers (GitHub, GitLab) and various security scanners.
+  
+  Note: `rule_files` are required when the `semgrep` scanner is selected; they are optional otherwise.
+tags:
+  - "Scanning"
+consumes:
+  - "application/json"
+produces:
+  - "application/json"
+security:
+  - ApiKeyAuth: []
+parameters:
+  - in: "header"
+    name: "API-SECRET-KEY"
+    type: "string"
+    required: true
+    description: "API secret key for authentication"
+  - in: "body"
+    name: "body"
+    description: "Scan configuration"
+    required: true
+    schema:
+      type: "object"
+      required:
+        - "config"
+      properties:
+        config:
+          type: "object"
+          required:
+            - "base_url"
+            - "target"
+          properties:
+            base_url:
+              type: "string"
+              description: "Base URL of the repository provider (e.g., https://github.com or https://gitlab.example.com)"
+              example: "https://github.com"
+            api_secret_key:
+              type: "string"
+              description: "Optional API secret key for the configuration"
+            target:
+              type: "object"
+              required:
+                - "provider"
+              properties:
+                provider:
+                  type: "string"
+                  enum: ["github", "gitlab"]
+                  description: "Repository provider type"
+                repositories:
+                  type: "array"
+                  items:
+                    type: "string"
+                  description: "List of specific repositories to scan"
+                  example: ["owner/repo1", "owner/repo2"]
+                organizations:
+                  type: "array"
+                  items:
+                    type: "string"
+                  description: "List of GitHub organizations to scan (GitHub only)"
+                  example: ["my-org", "another-org"]
+                groups:
+                  type: "array"
+                  items:
+                    type: "string"
+                  description: "List of GitLab groups to scan (GitLab only)"
+                  example: ["my-group", "another-group"]
+            filters:
+              type: "object"
+              description: "Optional filters to apply to repositories"
+              properties:
+                is_archived:
+                  type: "boolean"
+                  description: "Filter by archived status"
+                is_fork:
+                  type: "boolean"
+                  description: "Filter by fork status"
+                is_personal_project:
+                  type: "boolean"
+                  description: "Filter by personal project status"
+                max_repo_mb_size:
+                  type: "integer"
+                  minimum: 0
+                  description: "Maximum repository size in MB"
+                last_commit_max_age:
+                  type: "integer"
+                  minimum: 0
+                  description: "Maximum age of last commit in days"
+                ignore_path_regexes:
+                  type: "array"
+                  items:
+                    type: "string"
+                  description: "Regular expressions for paths to ignore"
+                  example: ["node_modules/.*", ".*\\.test\\.js"]
+                must_path_regexes:
+                  type: "array"
+                  items:
+                    type: "string"
+                  description: "Regular expressions for paths that must be present"
+                  example: [".*\\.py", ".*\\.js"]
+            scanners:
+              type: "array"
+              items:
+                type: "string"
+                enum: ["semgrep", "trufflehog", "dependency-confusion"]
+              description: "List of scanners to use"
+              example: ["semgrep", "dependency-confusion"]
+        rule_files:
+          type: "array"
+          description: "List of rule files for the scanners"
+          items:
+            type: "object"
+            required:
+              - "name"
+              - "content"
+            properties:
+              name:
+                type: "string"
+                description: "Rule file name (must end with .yaml, .yml, or .json)"
+                example: "custom-rules.yaml"
+              content:
+                type: "string"
+                description: "Rule file content"
+                example: |
+                  rules:
+                    - id: example-rule
+                      pattern: dangerous_function()
+                      message: "Avoid using dangerous_function"
+responses:
+  200:
+    description: "Scan started successfully"
+    schema:
+      type: "object"
+      properties:
+        scan_id:
+          type: "string"
+          description: "Unique identifier for the scan"
+          example: "SCAN-2024-01-15-14-30-45"
+  400:
+    description: "Invalid request"
+    schema:
+      type: "object"
+      properties:
+        error:
+          type: "string"
+          example: "Invalid configuration: Missing required field 'target'"
+  403:
+    description: "Authentication failed"
+    schema:
+      type: "object"
+      properties:
+        error:
+          type: "string"
+          example: "Invalid API-SECRET-KEY"
+  500:
+    description: "Internal server error"
+    schema:
+      type: "object"
+      properties:
+        error:
+          type: "string"
+          example: "Failed to start scan"
+
+definitions:
+  ScanConfig:
+    type: "object"
+    description: "Complete scan configuration"
+  
+securityDefinitions:
+  ApiKeyAuth:
+    type: "apiKey"
+    in: "header"
+    name: "API-SECRET-KEY"

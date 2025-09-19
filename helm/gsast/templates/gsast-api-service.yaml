@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: Service
+metadata:
+  {{- if .Values.internal.enabled }}
+  {{- if or .Values.internal.serviceAnnotations .Values.internal.annotations }}
+  annotations:
+    {{- with .Values.internal.serviceAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.internal.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+  {{- end }}
+  name: {{ include "gsast.fullname" . }}-api
+  labels:
+    {{- include "gsast.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    component: gsast-api
+  {{- if .Values.internal.enabled }}
+  clusterIP: None
+  {{- if .Values.api.loadBalancerIP }}
+  loadBalancerIP: {{ .Values.api.loadBalancerIP }}
+  {{- end }}
+  {{- end }}
+  ipFamilies:
+  - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+  - name: http-port
+    protocol: TCP
+    {{- if .Values.internal.enabled }}
+    port: 443
+    {{- else }}
+    port: {{ .Values.api.service.port }}
+    {{- end }}
+    targetPort: 5000
+  sessionAffinity: None
+  type: {{ .Values.api.service.type | default "ClusterIP" }}
