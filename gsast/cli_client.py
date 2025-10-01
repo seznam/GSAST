@@ -29,7 +29,7 @@ def create_default_config(config_path: str):
                 'must_path_regexes': [],
                 'last_commit_max_age': 365,
             },
-            'scanners': ['semgrep'],
+            'scanners': None,  # Will use registry defaults
         }
         json.dump(default_config, config_file, indent=4)
 
@@ -82,7 +82,7 @@ def build_config_from_args(cli_args, base_config: GSASTConfig):
         'api_secret_key': base_config.api_secret_key,
         'base_url': base_config.base_url,
         'target': base_config.target.to_dict() if base_config.target else {'provider': 'github'},
-        'scanners': base_config.scanners or ['semgrep']
+        'scanners': base_config.scanners  # Will use registry defaults if None
     }
     
     # Build filters from CLI args, falling back to base config
@@ -205,19 +205,14 @@ def scan(ctx, rules, **cli_args):
     split_comma_list_args(cli_args, ['ignore_path_regexes', 'must_path_regexes', 'group_ids'])
     final_config = build_config_from_args(cli_args, base_config)
 
-    # Check if semgrep scanner is enabled and rules are required
-    semgrep_enabled = final_config.scanners and ScannerType.SEMGREP in final_config.scanners
-    
-    if semgrep_enabled and not rules:
-        click.secho("Error: Rules are required when 'semgrep' scanner is enabled in the configuration.", fg='red')
-        click.secho("Please provide rule files/directories as arguments or remove 'semgrep' from scanners list.", fg='red')
-        raise click.ClickException("Rules are required for semgrep scanner")
-    
-    if not semgrep_enabled and rules:
-        click.secho("Warning: Rules provided but 'semgrep' scanner is not enabled in configuration. Rules will be ignored.", fg='yellow')
+    # CLI only validates basic file existence for rules if provided
+    # All scanner validation happens on the backend
+    if not final_config.scanners and rules:
+        click.secho("Info: No scanners specified. Backend will determine available scanners and rule requirements.", fg='blue')
 
     rule_files = []
-    if semgrep_enabled and rules:
+    # Process rules if provided (regardless of scanner validation)
+    if rules:
         rule_extensions = ('.yaml', '.yml', '.json')
         for rule_path in rules:
             if os.path.isdir(rule_path):
@@ -234,7 +229,7 @@ def scan(ctx, rules, **cli_args):
             click.secho("Error: No valid rule files found in the provided paths.", fg='red')
             raise click.ClickException("No valid rule files found")
         
-        click.secho(f"Loaded {len(rule_files)} rule files for semgrep scanner.", fg='green')
+        click.secho(f"Loaded {len(rule_files)} rule files.", fg='green')
 
     # Build the data payload using the new structured format
     data = {
@@ -301,6 +296,14 @@ def cleanup_projects(ctx):
     config_path = ctx.obj['config_path']
     config = load_config(config_path)
     execute_api_request('DELETE', '/queue/projects', config)
+
+
+@cli.command()
+@click.pass_context
+def scanners(ctx):
+    config_path = ctx.obj['config_path']
+    config = load_config(config_path)
+    execute_api_request('GET', '/scanners', config)
 
 
 if __name__ == '__main__':

@@ -14,6 +14,7 @@ from repolib.api import UnifiedRepositoryAPI
 from models.config_models import GSASTConfig
 from utils.tracked_scan import TrackedScan
 from sastlib.results_storage import get_scan_results
+from pathlib import Path
 
 
 REDIS_SCANS: Redis = None
@@ -82,25 +83,65 @@ def start_scan():
     else:
         return jsonify({'error': 'Missing config field'}), 400
     
-    # Validate rule files if semgrep is enabled
-    if scan_config.scanners and 'semgrep' in scan_config.scanners:
-        if not rule_files or not isinstance(rule_files, list):
-            return jsonify({'error': 'Rule files are required'}), 400
+    # Import plugin manager for validation
+    from sastlib.plugin_manager import PluginManager
+    plugin_manager = PluginManager()
+    
+    # Extract scanner settings with proper defaults
+    if scan_config.scanners:
+        scanners = [s.value for s in scan_config.scanners]
+    else:
+        # Default to all available plugins
+        scanners = plugin_manager.get_default_plugins()
+    
+    # Create temporary rules directory for validation if rule files provided
+    rules_dir = None
+    if rule_files:
+        import tempfile
+        rules_dir = Path(tempfile.mkdtemp())
+        try:
+            # Write rule files to temporary directory
+            for rule_file in rule_files:
+                rule_path = rules_dir / rule_file['name']
+                rule_path.parent.mkdir(parents=True, exist_ok=True)
+                with open(rule_path, 'w') as f:
+                    f.write(rule_file['content'])
+        except Exception as e:
+            # Clean up temporary directory on error
+            import shutil
+            shutil.rmtree(rules_dir)
+            return jsonify({'error': f'Failed to process rule files: {str(e)}'}), 400
+    
+    # Validate plugin requirements with both rule_files and rules_dir
+    try:
+        is_valid, error_msg = plugin_manager.validate_plugin_requirements(
+            scanners, 
+            rule_files=rule_files,
+            rules_dir=rules_dir
+        )
+        if not is_valid:
+            # Clean up temporary directory on validation failure
+            if rules_dir:
+                import shutil
+                shutil.rmtree(rules_dir)
+            return jsonify({'error': error_msg}), 400
+    except Exception as e:
+        # Clean up temporary directory on validation error
+        if rules_dir:
+            import shutil
+            shutil.rmtree(rules_dir)
+        return jsonify({'error': f'Plugin validation failed: {str(e)}'}), 500
 
-        for rule_file in rule_files:
-            if 'name' not in rule_file or 'content' not in rule_file:
-                return jsonify({'error': 'Rule file must contain "name" and "content" fields'}), 400
-            if not rule_file['name'].endswith(('.yaml', '.yml', '.json')):
-                return jsonify({'error': f'Rule file {rule_file["name"]} is not in .yaml or .json format'}), 400
+    # Clean up temporary validation directory (not needed for scan execution)
+    if rules_dir:
+        import shutil
+        shutil.rmtree(rules_dir)
 
     # initialize unified API
     cache_backend = RedisCache(connection=g.redis_projects)
     unified_api = UnifiedRepositoryAPI(filters=scan_config.filters, 
                                        target=scan_config.target,
                                        cache_backend=cache_backend)
-
-    # Extract scanner settings
-    scanners = [s.value for s in (scan_config.scanners or ['semgrep'])]
 
     tracked_scan = TrackedScan(
         unified_api, 
@@ -126,6 +167,42 @@ def get_scan_status(scan_id: str):
         return jsonify({'error': 'Scan not found'}), 404
 
     return jsonify(scan_info), 200
+
+
+@app.route('/scanners', methods=['GET'])
+@swag_from('docs/scanners.yaml')
+@requires_api_key
+def get_available_scanners():
+    """
+    Get list of available scanner plugins with their metadata.
+    
+    Returns:
+        JSON object with list of available scanners and their descriptions
+    """
+    try:
+        # Import plugin manager to get available scanners
+        from sastlib.plugin_manager import PluginManager
+        plugin_manager = PluginManager()
+        
+        scanners = []
+        for plugin_id in plugin_manager.list_plugins():
+            metadata = plugin_manager.get_plugin_metadata(plugin_id)
+            if metadata:
+                scanners.append({
+                    'id': metadata['plugin_id'],
+                    'name': metadata['name'],
+                    'version': metadata['version'],
+                    'author': metadata['author'],
+                    'description': metadata['description']
+                })
+        
+        return jsonify({
+            'scanners': scanners,
+            'count': len(scanners)
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Failed to retrieve scanners: {str(e)}'}), 500
 
 
 @app.route('/scan/<scan_id>/results', methods=['GET'])
