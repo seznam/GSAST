@@ -7,10 +7,8 @@ from rq import Worker
 
 from utils import infra_cli
 import sastlib.ruleset_downloader as ruleset_downloader
-import sastlib.semgrep_api as semgrep_api
-import sastlib.trufflehog_api as trufflehog_api
-import sastlib.dependency_confusion_api as dependency_confusion_api
 import sastlib.results_storage as results_storage
+from sastlib.plugin_manager import plugin_manager
 import repolib.downloader.gitlab_downloader as gitlab_downloader
 import repolib.downloader.github_downloader as github_downloader
 from utils.safe_logging import log
@@ -28,17 +26,26 @@ def process_task(scan_id, project_ssh_url, rule_keys, scanners, project_url=None
     # Determine project path using the unified downloader
     project_path_with_namespace = unified_project_downloader.get_project_path(project_ssh_url)
     
-    # Determine if we need secrets scanning for git clone strategy
-    scan_secrets = 'trufflehog' in scanners
+    # Determine if any scanner requires full git history
+    needs_full_history = plugin_manager.needs_full_git_history(scanners)
     
     log.info(f'Processing task for project: {project_path_with_namespace} with scan_id: {scan_id} with scanners: {scanners}')
 
-    rules_dir = sast_ruleset_downloader.get_rules(rule_keys)
-    if not rules_dir and 'semgrep' in scanners:
-        log.error(f'Failed to download rules for scan_id: {scan_id}')
-        exit_with_cleanup()
+    # Get rules directory if any scanner needs it
+    rules_dir = None
+    requirements = plugin_manager.get_plugin_requirements(scanners)
+    needs_rules = any(
+        any(req.name == "rules_dir" and req.required for req in reqs)
+        for reqs in requirements.values()
+    )
+    
+    if needs_rules:
+        rules_dir = sast_ruleset_downloader.get_rules(rule_keys)
+        if not rules_dir:
+            log.error(f'Failed to download rules for scan_id: {scan_id}')
+            exit_with_cleanup()
 
-    use_partial_git_clone = not scan_secrets
+    use_partial_git_clone = not needs_full_history
     download_result = unified_project_downloader.download_project(project_ssh_url, scan_id, use_partial_git_clone)
     if not download_result:
         log.error(f'Failed to download project sources for scan_id: {scan_id}')
@@ -49,56 +56,39 @@ def process_task(scan_id, project_ssh_url, rule_keys, scanners, project_url=None
     try:
         has_upload_errors = False
 
-        # Run semgrep scan if configured
-        if 'semgrep' in scanners:
-            sarif_results = semgrep_api.run_scan(project_sources_dir, project_parent_dir, rules_dir)
-            if sarif_results:
-                log.info(f'Semgrep results: {sarif_results}')
+        # Run each configured scanner plugin
+        for plugin_id in scanners:
+            log.info(f'Running {plugin_id} scan')
+            
+            # Prepare plugin-specific arguments based on requirements
+            plugin_kwargs = {}
+            plugin = plugin_manager.get_plugin(plugin_id)
+            if plugin:
+                plugin_requirements = plugin.get_requirements()
+                for req in plugin_requirements:
+                    if req.name == 'rules_dir' and rules_dir:
+                        plugin_kwargs['rules_dir'] = rules_dir
+                    # Add other requirement mappings here as needed
+            
+            # Run the plugin
+            results = plugin_manager.run_plugin(
+                plugin_id, 
+                Path(project_sources_dir), 
+                Path(project_parent_dir),
+                **plugin_kwargs
+            )
+            
+            if results:
+                log.info(f'{plugin_id.capitalize()} results: {results}')
                 # Store results in Redis
                 store_ok = results_storage.store_scan_results(
-                    scans_redis, scan_id, project_url, 'semgrep', sarif_results
+                    scans_redis, scan_id, project_url, plugin_id, results
                 )
                 if not store_ok:
-                    log.error(f'Failed to store Semgrep results in Redis for scan_id: {scan_id}')
+                    log.error(f'Failed to store {plugin_id.capitalize()} results in Redis for scan_id: {scan_id}')
                     has_upload_errors = True
             else:
-                log.debug(f'No sarif results for scan_id: {scan_id}')
-        else:
-            log.info(f'Skipping semgrep scan (not in configured scanners): {scanners}')
-
-        # Run trufflehog scan if configured
-        if 'trufflehog' in scanners:
-            secrets_results = trufflehog_api.run_scan(project_sources_dir, project_parent_dir)
-            if secrets_results:
-                log.info(f'Trufflehog results: {secrets_results}')
-                # Store results in Redis
-                store_ok = results_storage.store_scan_results(
-                    scans_redis, scan_id, project_url, 'trufflehog', secrets_results
-                )
-                if not store_ok:
-                    log.error(f'Failed to store Trufflehog results in Redis for scan_id: {scan_id}')
-                    has_upload_errors = True
-            else:
-                log.debug(f'No secrets results for scan_id: {scan_id}')
-        else:
-            log.info(f'Skipping trufflehog scan (not in configured scanners): {scanners}')
-        
-        # Run dependency confusion scan if configured
-        if 'dependency-confusion' in scanners:
-            dependency_confusion_results = dependency_confusion_api.run_scan(Path(project_sources_dir), Path(project_parent_dir))
-            if dependency_confusion_results:
-                log.info(f'Dependency confusion results: {dependency_confusion_results}')
-                # Store results in Redis
-                store_ok = results_storage.store_scan_results(
-                    scans_redis, scan_id, project_url, 'dependency-confusion', dependency_confusion_results
-                )
-                if not store_ok:
-                    log.error(f'Failed to store Dependency Confusion results in Redis for scan_id: {scan_id}')
-                    has_upload_errors = True
-            else:
-                log.debug(f'No dependency confusion results for scan_id: {scan_id}')
-        else:
-            log.info(f'Skipping dependency confusion scan (not in configured scanners): {scanners}')
+                log.debug(f'No results for {plugin_id} scan_id: {scan_id}')
         
         if has_upload_errors:
             log.error(f'Failed to store results for scan_id: {scan_id}')
