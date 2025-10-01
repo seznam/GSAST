@@ -107,12 +107,14 @@ class TrackedScan:
 
     def _wait_for_workers(self) -> bool:
         self._update_scan_status('Waiting for ready workers to appear...')
-        workers = Worker.all(queue=self.tasks_queue)
         start_time = datetime.now()
-        while not workers:
+        while True:
+            workers = Worker.all(queue=self.tasks_queue)
+            if workers:
+                return True
             if (datetime.now() - start_time).seconds > default_values.SERVER_WAIT_FOR_WORKERS_TIMEOUT:
                 return False
-        return True
+            sleep(1)  # Wait a bit before checking again
 
     def _get_not_finished_jobs_count(self) -> int:
         jobs_by_status = self._get_current_jobs_status()
@@ -136,7 +138,16 @@ class TrackedScan:
 
         self._update_scan_status('Uploading provided rules to Redis')
         uploaded_rule_keys = self._upload_rules()
-        if not uploaded_rule_keys and 'semgrep' in self.scanners:
+        
+        # Check if any plugin requires rules
+        from sastlib.plugin_manager import plugin_manager
+        requirements = plugin_manager.get_plugin_requirements(self.scanners)
+        needs_rules = any(
+            any(req.name == "rule_files" and req.required for req in reqs)
+            for reqs in requirements.values()
+        )
+        
+        if not uploaded_rule_keys and needs_rules:
             self._update_scan_status('Error in uploading rules', is_error=True)
             return
 
