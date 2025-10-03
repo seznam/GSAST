@@ -4,7 +4,7 @@ import subprocess
 from typing import Optional, Dict
 from pathlib import Path
 
-from configs.repo_values import GITLAB_URL
+from configs.repo_values import GITLAB_URL, GITHUB_URL
 from utils.safe_logging import log
 
 from sastlib.results_splitter import trufflehog_to_sarif_and_split_by_source
@@ -43,7 +43,7 @@ def scan_for_secrets(trufflehog, scan_cwd: Path, project_sources_dir: Path) -> O
         '--only-verified',
         '-j',
         '--verifier',
-        f'gitlab={GITLAB_URL}',
+        f'github={GITHUB_URL}' if (project_sources_dir / '.github').exists() else f'gitlab={GITLAB_URL}',
         '--no-update',
     ]
 

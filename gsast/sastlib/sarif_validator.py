@@ -2,11 +2,10 @@
 SARIF Output Validation and Standardization for GSAST Framework
 
 This module provides utilities to validate and standardize SARIF output from scanner plugins.
+We trust scanners to output valid SARIF format and only do basic JSON validation.
 """
 
 import json
-import jsonschema
-import requests
 from typing import Optional, Dict, List, Any
 from pathlib import Path
 from datetime import datetime, timezone
@@ -18,30 +17,15 @@ class SarifValidator:
     """
     Validates and standardizes SARIF output from scanner plugins
     
-    Ensures all plugin outputs conform to SARIF 2.1.0 specification
-    and GSAST framework standards.
+    We trust scanners to output valid SARIF format and only do basic JSON validation.
+    No network calls are made - we rely on scanner plugins to produce valid SARIF.
     """
     
     SARIF_SCHEMA_URL = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/cos02/schemas/sarif-schema-2.1.0.json"
     SARIF_VERSION = "2.1.0"
     
     def __init__(self):
-        self._schema = None
-        self._load_schema()
-    
-    def _load_schema(self):
-        """Load SARIF 2.1.0 JSON schema for validation"""
-        try:
-            # Try to download schema from official URL
-            response = requests.get(self.SARIF_SCHEMA_URL, timeout=30)
-            response.raise_for_status()
-            self._schema = response.json()
-            log.debug("Loaded SARIF schema from official URL")
-            
-        except Exception as e:
-            log.warning(f"Failed to load SARIF schema from URL: {e}")
-            # Fall back to basic validation without schema
-            self._schema = None
+        pass
     
     def validate_sarif_file(self, sarif_file_path: Path) -> tuple[bool, Optional[str]]:
         """
@@ -77,16 +61,10 @@ class SarifValidator:
         Returns:
             Tuple of (is_valid, error_message)
         """
-        # Basic structure validation
+        # Basic structure validation only
         basic_valid, basic_error = self._validate_basic_structure(sarif_data)
         if not basic_valid:
             return False, basic_error
-        
-        # Schema validation if available
-        if self._schema:
-            schema_valid, schema_error = self._validate_against_schema(sarif_data)
-            if not schema_valid:
-                return False, schema_error
         
         # GSAST-specific validation
         gsast_valid, gsast_error = self._validate_gsast_requirements(sarif_data)
@@ -134,9 +112,12 @@ class SarifValidator:
         if not isinstance(run, dict):
             return False, "Run must be an object"
         
-        # Check required run fields
         if "tool" not in run:
             return False, "Run missing required 'tool' field"
+        
+        tool_valid, tool_error = self._validate_tool(run["tool"])
+        if not tool_valid:
+            return False, f"Tool validation failed: {tool_error}"
         
         if "results" not in run:
             return False, "Run missing required 'results' field"
@@ -144,12 +125,7 @@ class SarifValidator:
         if not isinstance(run["results"], list):
             return False, "Run 'results' field must be an array"
         
-        # Validate tool
-        tool_valid, tool_error = self._validate_tool(run["tool"])
-        if not tool_valid:
-            return False, f"Tool validation failed: {tool_error}"
-        
-        # Validate results
+        # Validate each result
         for i, result in enumerate(run["results"]):
             result_valid, result_error = self._validate_result(result, i)
             if not result_valid:
@@ -158,7 +134,7 @@ class SarifValidator:
         return True, None
     
     def _validate_tool(self, tool: Dict[str, Any]) -> tuple[bool, Optional[str]]:
-        """Validate SARIF tool object"""
+        """Validate a SARIF tool object"""
         
         if not isinstance(tool, dict):
             return False, "Tool must be an object"
@@ -176,11 +152,6 @@ class SarifValidator:
         if not isinstance(driver["name"], str) or not driver["name"].strip():
             return False, "Tool driver name must be a non-empty string"
         
-        # Version is recommended
-        if "version" in driver:
-            if not isinstance(driver["version"], str):
-                return False, "Tool driver version must be a string"
-        
         return True, None
     
     def _validate_result(self, result: Dict[str, Any], result_index: int) -> tuple[bool, Optional[str]]:
@@ -189,21 +160,9 @@ class SarifValidator:
         if not isinstance(result, dict):
             return False, "Result must be an object"
         
-        # Check required result fields
-        if "ruleId" not in result:
-            return False, "Result missing required 'ruleId' field"
-        
         if "message" not in result:
             return False, "Result missing required 'message' field"
         
-        if "locations" not in result:
-            return False, "Result missing required 'locations' field"
-        
-        # Validate ruleId
-        if not isinstance(result["ruleId"], str) or not result["ruleId"].strip():
-            return False, "Result ruleId must be a non-empty string"
-        
-        # Validate message
         message = result["message"]
         if not isinstance(message, dict):
             return False, "Result message must be an object"
@@ -214,24 +173,20 @@ class SarifValidator:
         if not isinstance(message["text"], str) or not message["text"].strip():
             return False, "Result message text must be a non-empty string"
         
-        # Validate level (if present)
-        if "level" in result:
-            valid_levels = ["note", "warning", "error"]
-            if result["level"] not in valid_levels:
-                return False, f"Result level must be one of {valid_levels}, got '{result['level']}'"
+        if "locations" not in result:
+            return False, "Result missing required 'locations' field"
         
-        # Validate locations
-        locations = result["locations"]
-        if not isinstance(locations, list):
+        if not isinstance(result["locations"], list):
             return False, "Result locations must be an array"
         
-        if len(locations) == 0:
+        if len(result["locations"]) == 0:
             return False, "Result must have at least one location"
         
-        for i, location in enumerate(locations):
-            loc_valid, loc_error = self._validate_location(location, i)
-            if not loc_valid:
-                return False, f"Location {i}: {loc_error}"
+        # Validate each location
+        for i, location in enumerate(result["locations"]):
+            location_valid, location_error = self._validate_location(location, i)
+            if not location_valid:
+                return False, f"Location {i}: {location_error}"
         
         return True, None
     
@@ -263,68 +218,41 @@ class SarifValidator:
         
         return True, None
     
-    def _validate_against_schema(self, sarif_data: Dict[str, Any]) -> tuple[bool, Optional[str]]:
-        """Validate SARIF data against official JSON schema"""
-        
-        if not self._schema:
-            return True, None  # Skip schema validation if schema not available
-        
-        try:
-            jsonschema.validate(instance=sarif_data, schema=self._schema)
-            return True, None
-        except jsonschema.ValidationError as e:
-            return False, f"SARIF schema validation failed: {e.message}"
-        except Exception as e:
-            log.warning(f"Schema validation error: {e}")
-            return True, None  # Don't fail on schema validation errors
-    
     def _validate_gsast_requirements(self, sarif_data: Dict[str, Any]) -> tuple[bool, Optional[str]]:
         """Validate GSAST-specific requirements"""
         
-        # For now, just validate basic requirements
-        # Future: Add GSAST-specific rules, taxonomy requirements, etc.
-        
-        for run in sarif_data["runs"]:
-            # Ensure tool information is present and meaningful
-            driver = run["tool"]["driver"]
-            
-            if not driver.get("name"):
-                return False, "Tool driver name is required for GSAST compatibility"
-            
-            # Check for recommended fields
-            if not driver.get("version"):
-                log.warning("Tool driver version is recommended for better traceability")
-        
+        # GSAST doesn't have specific requirements beyond basic SARIF structure
+        # We trust scanners to produce valid SARIF format
         return True, None
     
     def standardize_sarif_output(self, sarif_data: Dict[str, Any], plugin_metadata: Dict[str, str]) -> Dict[str, Any]:
         """
-        Standardize SARIF output to ensure consistency across GSAST plugins
+        Standardize SARIF output with GSAST metadata
         
         Args:
             sarif_data: Original SARIF data
-            plugin_metadata: Plugin metadata for enrichment
+            plugin_metadata: Plugin metadata to add
             
         Returns:
             Standardized SARIF data
         """
-        # Make a copy to avoid modifying original
+        # Create a copy to avoid modifying original
         standardized = json.loads(json.dumps(sarif_data))
         
-        # Ensure proper schema URL
-        standardized["$schema"] = self.SARIF_SCHEMA_URL
-        standardized["version"] = self.SARIF_VERSION
-        
-        # Add GSAST metadata to runs
-        for run in standardized["runs"]:
-            # Enhance tool information
-            driver = run["tool"]["driver"]
+        # Ensure each run has GSAST metadata in tool properties
+        for run in standardized.get("runs", []):
+            tool = run.get("tool", {})
+            driver = tool.get("driver", {})
             
-            # Ensure version is present
-            if not driver.get("version") and plugin_metadata.get("version"):
+            # Update tool metadata if provided
+            if "name" in plugin_metadata:
+                driver["name"] = plugin_metadata["name"]
+            if "version" in plugin_metadata:
                 driver["version"] = plugin_metadata["version"]
+            if "homepage" in plugin_metadata:
+                driver["informationUri"] = plugin_metadata["homepage"]
             
-            # Add GSAST-specific metadata
+            # Add GSAST metadata to tool properties
             if "properties" not in driver:
                 driver["properties"] = {}
             
@@ -332,13 +260,8 @@ class SarifValidator:
                 "pluginId": plugin_metadata.get("plugin_id", "unknown"),
                 "pluginAuthor": plugin_metadata.get("author", "unknown"),
                 "scanTimestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-                "gsastVersion": "0.1.0"  # TODO: Get actual version
+                "gsastVersion": "0.1.0"
             }
-            
-            # Normalize result levels
-            for result in run.get("results", []):
-                if "level" not in result:
-                    result["level"] = "warning"  # Default level
         
         return standardized
     

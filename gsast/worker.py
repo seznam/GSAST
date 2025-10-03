@@ -68,6 +68,19 @@ def process_task(scan_id, project_ssh_url, rule_keys, scanners, project_url=None
                 for req in plugin_requirements:
                     if req.name == 'rules_dir' and rules_dir:
                         plugin_kwargs['rules_dir'] = rules_dir
+                    elif req.name == 'rule_files' and rule_keys:
+                        # Convert rule keys to rule files format for semgrep plugin
+                        rule_files = []
+                        for rule_key in rule_keys:
+                            rule_content = rules_redis.get(rule_key)
+                            if rule_content:
+                                # Extract rule file name from rule key (format: scan_id:rule_file_path)
+                                rule_file_name = rule_key.split(':', 1)[1] if ':' in rule_key else rule_key
+                                rule_files.append({
+                                    'name': rule_file_name,
+                                    'content': rule_content.decode('utf-8') if isinstance(rule_content, bytes) else rule_content
+                                })
+                        plugin_kwargs['rule_files'] = rule_files
                     # Add other requirement mappings here as needed
             
             # Run the plugin
