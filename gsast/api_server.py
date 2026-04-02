@@ -5,7 +5,6 @@ import os
 from flask import Flask, request, jsonify, g
 from multiprocessing import Process
 from redis.client import Redis
-from requests_cache import RedisCache
 from rq import Queue
 from flasgger import Swagger, swag_from
 
@@ -138,10 +137,9 @@ def start_scan():
         shutil.rmtree(rules_dir)
 
     # initialize unified API
-    cache_backend = RedisCache(connection=g.redis_projects)
     unified_api = UnifiedRepositoryAPI(filters=scan_config.filters, 
                                        target=scan_config.target,
-                                       cache_backend=cache_backend)
+                                       cache_backend=g.redis_projects)
 
     tracked_scan = TrackedScan(
         unified_api, 

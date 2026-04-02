@@ -1,3 +1,5 @@
+import hashlib
+import json
 from typing import List, Optional
 from pathlib import Path
 from .github_provider import GitHubProvider  
@@ -6,6 +8,16 @@ from .base import BaseRepository
 from .status_updater import ProjectFetchStatusUpdater
 from models.config_models import TargetConfig, FiltersConfig, ProviderType
 from configs.repo_values import GITHUB_API_TOKEN, GITLAB_API_TOKEN, GITLAB_URL
+from configs.default_values import API_CACHE_EXPIRE_AFTER
+
+
+def _build_cache_key(target: TargetConfig, filters: Optional[FiltersConfig]) -> str:
+    raw = (
+        json.dumps(target.to_dict(), sort_keys=True)
+        + json.dumps(filters.to_dict() if filters else {}, sort_keys=True)
+    )
+    digest = hashlib.sha256(raw.encode()).hexdigest()
+    return f"repo_meta:{digest}"
 
 
 class UnifiedRepositoryAPI:
@@ -39,7 +51,20 @@ class UnifiedRepositoryAPI:
     
     def fetch_repositories(self, project_fetch_status_updater: ProjectFetchStatusUpdater) -> int:
         """Fetch repositories based on target configuration and filters - returns COUNT"""
+        cache_key = _build_cache_key(self.target, self.filters)
+
+        if self.cache_backend:
+            cached = self.cache_backend.get(cache_key)
+            if cached:
+                self._repositories = [BaseRepository.from_dict(r) for r in json.loads(cached)]
+                return len(self._repositories)
+
         self._repositories = self.provider.fetch_repositories(self.target, self.filters, project_fetch_status_updater)
+
+        if self.cache_backend:
+            ttl = API_CACHE_EXPIRE_AFTER * 7 * 24 * 3600
+            self.cache_backend.setex(cache_key, ttl, json.dumps([r.to_dict() for r in self._repositories]))
+
         return len(self._repositories)
     
     def get_repositories_ssh_urls(self) -> List[str]:

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 
 
@@ -43,5 +44,15 @@ class BaseRepository:
             'private': self.private
         }
     
+    @classmethod
+    def from_dict(cls, data: dict) -> 'BaseRepository':
+        """Deserialize from a dictionary, parsing ISO datetime strings for temporal fields."""
+        parsed = dict(data)
+        for field in ('last_activity', 'created_at'):
+            value = parsed.get(field)
+            if isinstance(value, str):
+                parsed[field] = datetime.fromisoformat(value)
+        return cls(**parsed)
+
     def __str__(self):
         return f"BaseRepository(name={self.name}, full_name={self.full_name}, description={self.description}, clone_url={self.clone_url}, ssh_url={self.ssh_url}, web_url={self.web_url}, size_mb={self.size_mb}, stars={self.stars}, forks={self.forks}, language={self.language}, archived={self.archived}, is_fork={self.is_fork}, last_activity={self.last_activity}, created_at={self.created_at}, owner={self.owner}, private={self.private})"
