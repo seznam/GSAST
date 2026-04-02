@@ -445,10 +445,12 @@ class TestUnifiedRepositoryAPIIntegration:
                 mock_github_provider.return_value = mock_provider
                 
                 # api_server.py pattern
+                mock_cache = Mock()
+                mock_cache.get.return_value = None
                 unified_api = UnifiedRepositoryAPI(
                     filters=filters, 
                     target=target,
-                    cache_backend='test_cache'
+                    cache_backend=mock_cache
                 )
                 
                 # tracked_scan.py pattern
