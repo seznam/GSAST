@@ -156,7 +156,7 @@ class GitLabProvider:
                 if hasattr(project, 'namespace') and project.namespace:
                     # In GitLab, personal projects have namespace.kind == 'user'
                     # Group projects have namespace.kind == 'group'
-                    namespace_kind = getattr(project.namespace, 'kind', None)
+                    namespace_kind = project.namespace.get('kind')
                     is_personal = (namespace_kind == 'user')
                 
                 if is_personal != filters.is_personal_project:
