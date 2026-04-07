@@ -18,6 +18,7 @@ class BaseRepository:
         self.language = kwargs.get('language', '')
         self.archived = kwargs.get('archived', False)
         self.is_fork = kwargs.get('is_fork', False)
+        self.is_personal_project = kwargs.get('is_personal_project', False)
         self.last_activity = kwargs.get('last_activity')
         self.created_at = kwargs.get('created_at')
         self.owner = kwargs.get('owner', '')
@@ -38,6 +39,7 @@ class BaseRepository:
             'language': self.language,
             'archived': self.archived,
             'is_fork': self.is_fork,
+            'is_personal_project': self.is_personal_project,
             'last_activity': self.last_activity.isoformat() if self.last_activity else None,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'owner': self.owner,
