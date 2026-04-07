@@ -120,6 +120,8 @@ class GitLabProvider:
             return False
         if filters.is_fork is not None and repo.is_fork != filters.is_fork:
             return False
+        if filters.is_personal_project is not None and repo.is_personal_project != filters.is_personal_project:
+            return False
         if filters.max_repo_mb_size is not None and repo.size_mb > filters.max_repo_mb_size:
             return False
         
@@ -147,23 +149,6 @@ class GitLabProvider:
                     break
             if not matches_required_pattern:
                 return False
-        
-        # Personal project filter - for GitLab, check namespace kind
-        if filters.is_personal_project is not None and project:
-            try:
-                # GitLab projects have namespace information that tells us if it's personal or group
-                is_personal = False
-                if hasattr(project, 'namespace') and project.namespace:
-                    # In GitLab, personal projects have namespace.kind == 'user'
-                    # Group projects have namespace.kind == 'group'
-                    namespace_kind = project.namespace.get('kind')
-                    is_personal = (namespace_kind == 'user')
-                
-                if is_personal != filters.is_personal_project:
-                    return False
-            except Exception as e:
-                # If we can't determine the project type, log and continue
-                print(f"Warning: Could not determine if project {repo.full_name} is personal: {e}")
         
         return True
     
@@ -198,6 +183,9 @@ class GitLabProvider:
         except Exception as e:
             log.error(f"Error parsing created date of project {project.path_with_namespace}: {e}")
         
+        namespace = project.namespace if hasattr(project, 'namespace') and project.namespace else {}
+        is_personal_project = namespace.get('kind') == 'user'
+
         return BaseRepository(
             name=project.name,
             full_name=project.path_with_namespace,
@@ -211,9 +199,10 @@ class GitLabProvider:
             language=project.default_branch if hasattr(project, 'default_branch') else '',
             archived=project.archived,
             is_fork=hasattr(project, 'forked_from_project'),
+            is_personal_project=is_personal_project,
             last_activity=last_activity,
             created_at=created_at,
-            owner=project.namespace.get('path', ''),
+            owner=namespace.get('path', ''),
             private=project.visibility == 'private'
         )
     

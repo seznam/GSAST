@@ -125,6 +125,8 @@ class GitHubProvider:
             return False
         if filters.is_fork is not None and repo.is_fork != filters.is_fork:
             return False
+        if filters.is_personal_project is not None and repo.is_personal_project != filters.is_personal_project:
+            return False
         if filters.max_repo_mb_size is not None and repo.size_mb > filters.max_repo_mb_size:
             return False
         
@@ -153,21 +155,6 @@ class GitHubProvider:
             if not matches_required_pattern:
                 return False
         
-        # Personal project filter - for GitHub, check if owner is a user (not organization)
-        if filters.is_personal_project is not None and github_repo:
-            try:
-                # GitHub repos have owner.type that tells us if it's 'User' or 'Organization'
-                is_personal = False
-                if hasattr(github_repo, 'owner') and github_repo.owner:
-                    owner_type = getattr(github_repo.owner, 'type', None)
-                    is_personal = (owner_type == 'User')
-                
-                if is_personal != filters.is_personal_project:
-                    return False
-            except Exception as e:
-                # If we can't determine the project type, log and continue
-                print(f"Warning: Could not determine if repository {repo.full_name} is personal: {e}")
-        
         return True
     
     def get_repositories_ssh_urls(self, repositories: List[BaseRepository]) -> List[str]:
@@ -177,6 +164,9 @@ class GitHubProvider:
     def _convert_github_repo(self, repo) -> BaseRepository:
         """Convert GitHub repository to BaseRepository"""
         
+        owner_type = getattr(repo.owner, 'type', None) if hasattr(repo, 'owner') and repo.owner else None
+        is_personal_project = owner_type == 'User'
+
         return BaseRepository(
             name=repo.name,
             full_name=repo.full_name,
@@ -184,12 +174,13 @@ class GitHubProvider:
             clone_url=repo.clone_url,
             ssh_url=repo.ssh_url,
             web_url=repo.html_url,
-            size_mb=repo.size / 1024 if repo.size else 0,  # Convert KB to MB
+            size_mb=repo.size / 1024 if repo.size else 0,
             stars=repo.stargazers_count,
             forks=repo.forks_count,
             language=repo.language or '',
             archived=repo.archived,
             is_fork=repo.fork,
+            is_personal_project=is_personal_project,
             last_activity=repo.pushed_at,
             created_at=repo.created_at,
             owner=repo.owner.login,
