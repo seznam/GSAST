@@ -1,6 +1,6 @@
 # Global SAST Scanner
 
-A distributed security scanning tool for GitLab and GitHub repositories that performs Static Application Security Testing (SAST) using multiple security scanners including Semgrep, Trufflehog, and Confusion Hunter.
+A distributed security scanning tool for GitLab and GitHub repositories that performs Static Application Security Testing (SAST) using multiple security scanners including Semgrep, TruffleHog, and Dependency Confusion.
 
 ## Architecture
 
@@ -150,6 +150,12 @@ python3 gsast/cli_client.py results {SCAN-ID} \
 Notes:
 - The CLI handles URL encoding; just wrap JSONPath queries in quotes for your shell.
 
+#### List Available Scanners
+
+```bash
+python3 gsast/cli_client.py scanners
+```
+
 #### Management Commands
 
 ```bash
@@ -205,7 +211,7 @@ Available scanner types:
 |---------|-------------|
 | `"semgrep"` | Static code analysis using Semgrep rules |
 | `"trufflehog"` | Secrets detection in git history |
-| `"confusion-hunter"` | Dependency confusion vulnerability detection |
+| `"dependency-confusion"` | Dependency confusion vulnerability detection |
 
 #### Custom TruffleHog Detectors
 
@@ -220,7 +226,7 @@ See the [TruffleHog custom detectors documentation](https://trufflesecurity.com/
 -  **Job Creation**: Each repository becomes a separate job in the Redis queue
 -  **Worker Processing**: Worker processes pick up jobs and perform the actual scanning:
    - Clone repository (with or without full git history based on scanner requirements)
-   - Run configured scanners (Semgrep, Trufflehog, Confusion Hunter)
+   - Run configured scanners (Semgrep, TruffleHog, Dependency Confusion)
    - Store results in Redis
 -  **Result Aggregation**: Results from all repositories are available via API server
 
@@ -233,10 +239,43 @@ The API server provides REST endpoints for programmatic access:
 | POST | `/scan` | Start a new scan |
 | GET | `/scan/{scan_id}/status` | Get scan status |
 | GET | `/scan/{scan_id}/results` | Get scan results |
-| GET | `/queue/scans` | List all scans |
+| GET | `/scanners` | List available scanner plugins |
+| GET | `/queue/scans` | List all scan IDs |
 | GET | `/queue/projects` | List cached projects |
 | DELETE | `/queue/cleanup` | Clean up scan queues |
 | DELETE | `/queue/projects` | Clean up project cache |
+
+All endpoints require the `API-SECRET-KEY` request header.
+
+### Example API Calls
+
+```bash
+# Start a scan
+curl -X POST http://localhost:5000/scan \
+  -H "API-SECRET-KEY: your-api-secret-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "config": {
+      "api_secret_key": "your-api-secret-key",
+      "base_url": "http://localhost:5000",
+      "target": {"provider": "github", "organizations": ["my-org"]},
+      "scanners": ["semgrep", "trufflehog", "dependency-confusion"]
+    },
+    "rule_files": []
+  }'
+
+# Get scan status
+curl http://localhost:5000/scan/SCAN-2024-01-01-12-00-00/status \
+  -H "API-SECRET-KEY: your-api-secret-key"
+
+# List available scanners
+curl http://localhost:5000/scanners \
+  -H "API-SECRET-KEY: your-api-secret-key"
+
+# List all scans
+curl http://localhost:5000/queue/scans \
+  -H "API-SECRET-KEY: your-api-secret-key"
+```
 
 ### Result Filtering
 

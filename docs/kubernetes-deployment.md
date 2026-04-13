@@ -120,11 +120,11 @@ helm dependency update
 
 ```bash
 # Create namespace
-kubectl create namespace gsast
+kubectl create namespace gsast-local
 
 # Create secret with your credentials
-kubectl create secret generic gsast-secret \
-  --namespace gsast \
+kubectl create secret generic gsast-local-secret \
+  --namespace gsast-local \
   --from-literal=API_SECRET_KEY="your-secret-key" \
   --from-literal=GITHUB_API_TOKEN="your-github-token" \
   --from-literal=GITLAB_API_TOKEN="your-gitlab-token" \
@@ -136,8 +136,8 @@ kubectl create secret generic gsast-secret \
 ```bash
 # Install the chart
 helm install gsast . \
-  --namespace gsast \
-  --set existingSecret=gsast-secret \
+  --namespace gsast-local \
+  --set existingSecret=gsast-local-secret \
   --set worker.image.repositoryPrefix=gsast \
   --set worker.image.tag=latest \
   --set worker.image.pullPolicy=Never
@@ -147,7 +147,7 @@ helm install gsast . \
 
 ```bash
 # Port forward to access locally
-kubectl port-forward -n gsast service/gsast-api 5000:5000
+kubectl port-forward -n gsast-local service/gsast-api 5000:5000
 
 # Or create an ingress (see values.yaml for configuration)
 ```
@@ -337,8 +337,3 @@ helm uninstall gsast -n gsast-local
 kubectl delete namespace gsast-local
 ```
 
-## Next Steps
-
-- [Configure your first scan](configuration.md)
-- [Set up monitoring and alerting](monitoring.md)
-- [Production deployment best practices](production-deployment.md)
