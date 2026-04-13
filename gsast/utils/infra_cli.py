@@ -34,12 +34,13 @@ def parse_args(cli_description, is_worker=False):
 
     args = parser.parse_args()
 
+    if not args.gitlab_api_token and not args.github_api_token:
+        log.error('At least one provider token must be set: GITLAB_API_TOKEN or GITHUB_API_TOKEN')
+        sys.exit(1)
     if not args.gitlab_api_token:
-        log.error('Gitlab API token is not set in GITLAB_API_TOKEN env variable or --gitlab-api-token argument')
-        sys.exit(1)
+        log.warning('GITLAB_API_TOKEN is not set — GitLab scanning will be unavailable')
     if not args.github_api_token:
-        log.error('GitHub API token is not set in GITHUB_API_TOKEN env variable or --github-api-token argument')
-        sys.exit(1)
+        log.warning('GITHUB_API_TOKEN is not set — GitHub scanning will be unavailable')
 
     if not args.redis_url:
         log.error('Redis URL is not set in REDIS_URL env variable or --redis-url argument')

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   redis:
     image: redis:7-alpine
@@ -25,12 +23,11 @@ services:
       - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
       - API_SECRET_KEY=${API_SECRET_KEY:-dev-secret-key-change-in-production}
       - FLASK_ENV=${FLASK_ENV:-development}
-      - PYTHONPATH=/app
+      - PYTHONPATH=/app/gsast
     depends_on:
       redis:
         condition: service_healthy
     volumes:
-      - ./rules:/app/rules:ro
       - ./gsast:/app/gsast:ro
       - scan_results:/app/results
     restart: unless-stopped
@@ -42,24 +39,21 @@ services:
 
   gsast-worker:
     build: .
-    command: python worker.py
+    command: python gsast/worker.py
     environment:
       - REDIS_URL=redis://redis:6379
       - GITHUB_API_TOKEN=${GITHUB_API_TOKEN}
       - GITLAB_API_TOKEN=${GITLAB_API_TOKEN}
       - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
       - API_SECRET_KEY=${API_SECRET_KEY:-dev-secret-key-change-in-production}
-      - PYTHONPATH=/app
+      - PYTHONPATH=/app/gsast
     depends_on:
       redis:
         condition: service_healthy
     volumes:
       - ./gsast:/app/gsast:ro
       - scan_results:/app/results
-      - /var/run/docker.sock:/var/run/docker.sock:ro  # For potential container scanning
     restart: unless-stopped
-    deploy:
-      replicas: 2  # Run 2 worker instances
     healthcheck:
       test: ["CMD", "python", "-c", "import redis; r=redis.from_url('redis://redis:6379'); r.ping()"]
       interval: 30s
