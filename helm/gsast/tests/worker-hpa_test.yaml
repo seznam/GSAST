@@ -1,0 +1,157 @@
+suite: Worker HPA
+templates:
+  - gsast-worker-hpa.yaml
+
+tests:
+  # ── Gate: disabled by flag ─────────────────────────────────────────────────
+  - it: does not render when worker.autoscaling.enabled is false
+    set:
+      worker.autoscaling.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  # ── Basic rendering ────────────────────────────────────────────────────────
+  - it: renders an HPA when autoscaling is enabled
+    set:
+      worker.autoscaling.enabled: true
+    asserts:
+      - isKind:
+          of: HorizontalPodAutoscaler
+      - hasDocuments:
+          count: 1
+
+  - it: sets the correct HPA name
+    set:
+      worker.autoscaling.enabled: true
+    asserts:
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-gsast-worker-hpa
+
+  # ── scaleTargetRef ─────────────────────────────────────────────────────────
+  - it: targets the worker Deployment
+    set:
+      worker.autoscaling.enabled: true
+    asserts:
+      - equal:
+          path: spec.scaleTargetRef.apiVersion
+          value: apps/v1
+      - equal:
+          path: spec.scaleTargetRef.kind
+          value: Deployment
+      - equal:
+          path: spec.scaleTargetRef.name
+          value: RELEASE-NAME-gsast-worker
+
+  # ── Replica bounds ─────────────────────────────────────────────────────────
+  - it: sets minReplicas from values
+    set:
+      worker.autoscaling.enabled: true
+      worker.autoscaling.minReplicas: 2
+    asserts:
+      - equal:
+          path: spec.minReplicas
+          value: 2
+
+  - it: sets maxReplicas from values
+    set:
+      worker.autoscaling.enabled: true
+      worker.autoscaling.maxReplicas: 10
+    asserts:
+      - equal:
+          path: spec.maxReplicas
+          value: 10
+
+  - it: uses default values from values.yaml (min=1, max=5)
+    set:
+      worker.autoscaling.enabled: true
+    asserts:
+      - equal:
+          path: spec.minReplicas
+          value: 1
+      - equal:
+          path: spec.maxReplicas
+          value: 5
+
+  # ── CPU metric ────────────────────────────────────────────────────────────
+  - it: configures a CPU utilization metric
+    set:
+      worker.autoscaling.enabled: true
+    asserts:
+      - equal:
+          path: spec.metrics[0].type
+          value: Resource
+      - equal:
+          path: spec.metrics[0].resource.name
+          value: cpu
+      - equal:
+          path: spec.metrics[0].resource.target.type
+          value: Utilization
+
+  - it: sets targetCPUUtilizationPercentage from values
+    set:
+      worker.autoscaling.enabled: true
+      worker.autoscaling.targetCPUUtilizationPercentage: 80
+    asserts:
+      - equal:
+          path: spec.metrics[0].resource.target.averageUtilization
+          value: 80
+
+  - it: uses 70% CPU target from values.yaml by default
+    set:
+      worker.autoscaling.enabled: true
+    asserts:
+      - equal:
+          path: spec.metrics[0].resource.target.averageUtilization
+          value: 70
+
+  # ── Scale-up behavior (internal mode only) ─────────────────────────────────
+  - it: does not add behavior block when internal is disabled
+    set:
+      worker.autoscaling.enabled: true
+      internal.enabled: false
+    asserts:
+      - notExists:
+          path: spec.behavior
+
+  - it: adds scale-up behavior block when internal mode is enabled
+    set:
+      worker.autoscaling.enabled: true
+      internal.enabled: true
+    asserts:
+      - exists:
+          path: spec.behavior.scaleUp
+      - equal:
+          path: spec.behavior.scaleUp.stabilizationWindowSeconds
+          value: 30
+      - equal:
+          path: spec.behavior.scaleUp.selectPolicy
+          value: Max
+
+  - it: includes both Pods and Percent scale-up policies in internal mode
+    set:
+      worker.autoscaling.enabled: true
+      internal.enabled: true
+    asserts:
+      - contains:
+          path: spec.behavior.scaleUp.policies
+          content:
+            type: Pods
+            value: 3
+            periodSeconds: 60
+      - contains:
+          path: spec.behavior.scaleUp.policies
+          content:
+            type: Percent
+            value: 20
+            periodSeconds: 60
+
+  # ── Helm labels ────────────────────────────────────────────────────────────
+  - it: carries standard Helm managed-by label
+    set:
+      worker.autoscaling.enabled: true
+    asserts:
+      - equal:
+          path: metadata.labels["app.kubernetes.io/managed-by"]
+          value: Helm

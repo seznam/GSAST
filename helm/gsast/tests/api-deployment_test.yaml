@@ -1,0 +1,317 @@
+suite: API Deployment
+templates:
+  - gsast-api-deployment.yaml
+
+tests:
+  # ── Basic rendering ────────────────────────────────────────────────────────
+  - it: renders a Deployment
+    asserts:
+      - isKind:
+          of: Deployment
+      - hasDocuments:
+          count: 1
+
+  - it: sets the correct deployment name
+    asserts:
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-gsast-api
+
+  - it: sets the API container name
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].name
+          value: api
+
+  - it: uses the global image by default
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: gsast:latest
+
+  - it: uses the configured image pull policy
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].imagePullPolicy
+          value: IfNotPresent
+
+  - it: exposes port 5000
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            containerPort: 5000
+            name: http
+            protocol: TCP
+
+  - it: runs the uwsgi command
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].command[0]
+          value: uwsgi
+      - contains:
+          path: spec.template.spec.containers[0].command
+          content: "0.0.0.0:5000"
+
+  - it: labels the pod with component gsast-api
+    asserts:
+      - equal:
+          path: spec.template.metadata.labels.component
+          value: gsast-api
+
+  - it: sets default replica count to 1
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 1
+
+  - it: respects custom api.replicaCount
+    set:
+      api.replicaCount: 3
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 3
+
+  - it: uses RollingUpdate strategy
+    asserts:
+      - equal:
+          path: spec.strategy.type
+          value: RollingUpdate
+
+  # ── Secret references ──────────────────────────────────────────────────────
+  - it: reads API_SECRET_KEY from the generated secret by default
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: API_SECRET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-gsast-secret
+                key: API_SECRET_KEY
+
+  - it: reads GITLAB_URL from the generated secret by default
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GITLAB_URL
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-gsast-secret
+                key: GITLAB_URL
+
+  - it: reads secrets from existingSecret when set
+    set:
+      existingSecret: my-external-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: API_SECRET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: my-external-secret
+                key: API_SECRET_KEY
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GITLAB_URL
+            valueFrom:
+              secretKeyRef:
+                name: my-external-secret
+                key: GITLAB_URL
+
+  # ── Redis environment injection ────────────────────────────────────────────
+  - it: injects REDIS_URL inline and REDIS_PASSWORD from secret when redis is enabled
+    set:
+      redis.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: REDIS_URL
+            value: "redis://:$(REDIS_PASSWORD)@RELEASE-NAME-gsast-redis-master:6379"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: REDIS_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-gsast-redis
+                key: redis-password
+
+  - it: reads REDIS_URL from secret when redis is disabled
+    set:
+      redis.enabled: false
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: REDIS_URL
+            valueFrom:
+              secretKeyRef:
+                name: RELEASE-NAME-gsast-secret
+                key: REDIS_URL
+
+  - it: reads REDIS_URL from existingSecret when redis is disabled and existingSecret is set
+    set:
+      redis.enabled: false
+      existingSecret: production-secret
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: REDIS_URL
+            valueFrom:
+              secretKeyRef:
+                name: production-secret
+                key: REDIS_URL
+
+  # ── Proxy environment variables ────────────────────────────────────────────
+  - it: does not set proxy vars when not configured
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: http_proxy
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: https_proxy
+
+  - it: sets proxy env vars when configured
+    set:
+      environment.httpProxy: http://proxy.example.com:3128
+      environment.httpsProxy: http://proxy.example.com:3128
+      environment.noProxy: localhost,127.0.0.1
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: http_proxy
+            value: http://proxy.example.com:3128
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: HTTP_PROXY
+            value: http://proxy.example.com:3128
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: https_proxy
+            value: http://proxy.example.com:3128
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: no_proxy
+            value: "localhost,127.0.0.1"
+
+  # ── Custom GitLab CA ───────────────────────────────────────────────────────
+  - it: does not add CA volume when customGitlabCA is disabled
+    asserts:
+      - notExists:
+          path: spec.template.spec.volumes
+
+  - it: mounts the CA ConfigMap volume when customGitlabCA is enabled
+    set:
+      environment.customGitlabCA.enabled: true
+    asserts:
+      - exists:
+          path: spec.template.spec.volumes
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: custom-gitlab-ca
+            configMap:
+              name: gsast-ca
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: custom-gitlab-ca
+            mountPath: /ca/
+
+  - it: sets SSL env vars when customGitlabCA is enabled
+    set:
+      environment.customGitlabCA.enabled: true
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: REQUESTS_CA_BUNDLE
+            value: /ca/gitlab_ca.crt
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: SSL_CERT_FILE
+            value: /ca/gitlab_ca.crt
+
+  - it: uses the custom configMapName for the CA volume
+    set:
+      environment.customGitlabCA.enabled: true
+      environment.customGitlabCA.configMapName: custom-ca-map
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: custom-gitlab-ca
+            configMap:
+              name: custom-ca-map
+
+  # ── Internal mode ──────────────────────────────────────────────────────────
+  - it: does not add pod annotations when internal is disabled
+    asserts:
+      - notExists:
+          path: spec.template.metadata.annotations
+
+  - it: adds pod annotations when internal is enabled and annotations are set
+    set:
+      internal.enabled: true
+      internal.podAnnotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+    asserts:
+      - equal:
+          path: spec.template.metadata.annotations["prometheus.io/scrape"]
+          value: "true"
+
+  # ── Resource limits ────────────────────────────────────────────────────────
+  - it: applies default CPU and memory limits
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.cpu
+          value: 1500m
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.memory
+          value: 2500Mi
+
+  - it: respects custom resource overrides
+    set:
+      api.resources:
+        limits:
+          cpu: 500m
+          memory: 1Gi
+        requests:
+          cpu: 250m
+          memory: 512Mi
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].resources.limits.cpu
+          value: 500m
+      - equal:
+          path: spec.template.spec.containers[0].resources.requests.cpu
+          value: 250m
+
+  # ── Helm labels ────────────────────────────────────────────────────────────
+  - it: carries standard Helm managed-by label
+    asserts:
+      - equal:
+          path: metadata.labels["app.kubernetes.io/managed-by"]
+          value: Helm
+
+  - it: carries app.kubernetes.io/instance label on pod template
+    asserts:
+      - equal:
+          path: spec.template.metadata.labels["app.kubernetes.io/instance"]
+          value: RELEASE-NAME
