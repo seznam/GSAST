@@ -1,15 +1,21 @@
-from .base import BaseRepository
-from models.config_models import TargetConfig, FiltersConfig, ProviderType
-from typing import List, Optional
-from pathlib import Path
+import re
+import os
 import subprocess
+import urllib3
+import requests
+import ssl
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import List, Optional
+
 from github import Github
 from github.Auth import Token
 from tqdm import tqdm
-import os
-import requests
-import urllib3
-import ssl
+
+from .base import BaseRepository
+from .filters import filter_repository
+from models.config_models import TargetConfig, FiltersConfig, ProviderType
+from utils.safe_logging import log
 
 
 class GitHubProvider:
@@ -75,7 +81,7 @@ class GitHubProvider:
                         repo = self.client.get_repo(repo_name)
                         repos_sources.append([repo])  # Wrap single repo in list
                     except Exception as e:
-                        print(f"Could not fetch repository {repo_name}: {e}")
+                        log.warning(f"Could not fetch repository {repo_name}: {e}")
             
             if not repos_sources:
                 raise ValueError("No repositories specified in the target configuration")
@@ -99,63 +105,24 @@ class GitHubProvider:
                         
                         # Convert GitHub repo to BaseRepository
                         repo_info = self._convert_github_repo(repo)
-                        print(f"Repo info: {repo_info}")
+                        log.debug(f"Repo info: {repo_info}")
                         
                         # Apply filters if provided  
                         if self._should_include_repo(filters, repo_info, repo):
                             repositories.append(repo_info)
                             
                     except Exception as e:
-                        print(f"Error processing repository {repo.full_name}: {e}")
+                        log.error(f"Error processing repository {repo.full_name}: {e}")
                         continue
             
         except Exception as e:
-            print(f"Error fetching GitHub repositories: {e}")
+            log.error(f"Error fetching GitHub repositories: {e}")
             return []
         
         return repositories
     
     def _should_include_repo(self, filters: Optional[FiltersConfig], repo: BaseRepository, github_repo=None) -> bool:
-        """Comprehensive filtering logic"""
-        if not filters:
-            return True
-        
-        # Existing filters
-        if filters.is_archived is not None and repo.archived != filters.is_archived:
-            return False
-        if filters.is_fork is not None and repo.is_fork != filters.is_fork:
-            return False
-        if filters.is_personal_project is not None and repo.is_personal_project != filters.is_personal_project:
-            return False
-        if filters.max_repo_mb_size is not None and repo.size_mb > filters.max_repo_mb_size:
-            return False
-        
-        # Last commit age filter
-        if filters.last_commit_max_age is not None and repo.last_activity:
-            from datetime import datetime, timezone
-            days_since_last_commit = (datetime.now(timezone.utc) - repo.last_activity).days
-            if days_since_last_commit > filters.last_commit_max_age:
-                return False
-        
-        # Path regex filters - ignore patterns (exclude repos matching these patterns)
-        if filters.ignore_path_regexes:
-            import re
-            for pattern in filters.ignore_path_regexes:
-                if re.search(pattern, repo.full_name):
-                    return False
-        
-        # Path regex filters - must patterns (only include repos matching at least one pattern)
-        if filters.must_path_regexes:
-            import re
-            matches_required_pattern = False
-            for pattern in filters.must_path_regexes:
-                if re.search(pattern, repo.full_name):
-                    matches_required_pattern = True
-                    break
-            if not matches_required_pattern:
-                return False
-        
-        return True
+        return filter_repository(filters, repo)
     
     def get_repositories_ssh_urls(self, repositories: List[BaseRepository]) -> List[str]:
         """Get SSH URLs for all repositories"""
@@ -221,12 +188,12 @@ class GitHubProvider:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env)
             
             if result.returncode == 0:
-                print(f"Successfully downloaded {repo.full_name}")
+                log.info(f"Successfully downloaded {repo.full_name}")
                 return True
             else:
-                print(f"Failed to download {repo.full_name}: {result.stderr}")
+                log.error(f"Failed to download {repo.full_name}: {result.stderr}")
                 return False
                 
         except Exception as e:
-            print(f"Error downloading {repo.full_name}: {e}")
+            log.error(f"Error downloading {repo.full_name}: {e}")
             return False

@@ -1,0 +1,152 @@
+suite: API Service
+templates:
+  - gsast-api-service.yaml
+
+tests:
+  # ── Basic rendering ────────────────────────────────────────────────────────
+  - it: renders a Service
+    asserts:
+      - isKind:
+          of: Service
+      - hasDocuments:
+          count: 1
+
+  - it: sets the correct service name
+    asserts:
+      - equal:
+          path: metadata.name
+          value: RELEASE-NAME-gsast-api
+
+  # ── Selector ───────────────────────────────────────────────────────────────
+  - it: selects pods by release instance and component label
+    asserts:
+      - equal:
+          path: spec.selector["app.kubernetes.io/instance"]
+          value: RELEASE-NAME
+      - equal:
+          path: spec.selector.component
+          value: gsast-api
+
+  # ── Default (non-internal) mode ────────────────────────────────────────────
+  - it: defaults to ClusterIP type
+    asserts:
+      - equal:
+          path: spec.type
+          value: ClusterIP
+
+  - it: exposes port 5000 by default targeting port 5000 on the pod
+    asserts:
+      - contains:
+          path: spec.ports
+          content:
+            name: http-port
+            protocol: TCP
+            port: 5000
+            targetPort: 5000
+
+  - it: does not set clusterIP to None when internal is disabled
+    asserts:
+      - notEqual:
+          path: spec.clusterIP
+          value: None
+
+  - it: does not set loadBalancerIP when not configured
+    asserts:
+      - notExists:
+          path: spec.loadBalancerIP
+
+  - it: uses custom service type when set
+    set:
+      api.service.type: LoadBalancer
+    asserts:
+      - equal:
+          path: spec.type
+          value: LoadBalancer
+
+  - it: uses custom service port when set
+    set:
+      api.service.port: 8080
+    asserts:
+      - contains:
+          path: spec.ports
+          content:
+            name: http-port
+            protocol: TCP
+            port: 8080
+            targetPort: 5000
+
+  # ── Internal mode ──────────────────────────────────────────────────────────
+  - it: sets clusterIP to None in internal mode (headless)
+    set:
+      internal.enabled: true
+    asserts:
+      - equal:
+          path: spec.clusterIP
+          value: None
+
+  - it: uses port 443 in internal mode while keeping targetPort 5000
+    set:
+      internal.enabled: true
+    asserts:
+      - contains:
+          path: spec.ports
+          content:
+            name: http-port
+            protocol: TCP
+            port: 443
+            targetPort: 5000
+
+  - it: sets loadBalancerIP when internal is enabled and value is provided
+    set:
+      internal.enabled: true
+      api.loadBalancerIP: 10.0.0.50
+    asserts:
+      - equal:
+          path: spec.loadBalancerIP
+          value: 10.0.0.50
+
+  - it: adds service annotations when internal is enabled with serviceAnnotations
+    set:
+      internal.enabled: true
+      internal.serviceAnnotations:
+        service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+    asserts:
+      - equal:
+          path: metadata.annotations["service.beta.kubernetes.io/aws-load-balancer-internal"]
+          value: "true"
+
+  - it: adds internal.annotations to the service when set
+    set:
+      internal.enabled: true
+      internal.annotations:
+        custom.example.com/tier: backend
+    asserts:
+      - equal:
+          path: metadata.annotations["custom.example.com/tier"]
+          value: backend
+
+  - it: does not add service annotations when internal is disabled
+    set:
+      internal.enabled: false
+      internal.serviceAnnotations:
+        some.annotation: ignored
+    asserts:
+      - notExists:
+          path: metadata.annotations
+
+  # ── IP family ─────────────────────────────────────────────────────────────
+  - it: uses IPv4 single-stack policy
+    asserts:
+      - contains:
+          path: spec.ipFamilies
+          content: IPv4
+      - equal:
+          path: spec.ipFamilyPolicy
+          value: SingleStack
+
+  # ── Helm labels ────────────────────────────────────────────────────────────
+  - it: carries standard Helm managed-by label
+    asserts:
+      - equal:
+          path: metadata.labels["app.kubernetes.io/managed-by"]
+          value: Helm

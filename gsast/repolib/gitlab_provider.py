@@ -1,13 +1,17 @@
-import gitlab
-from .base import BaseRepository
-from models.config_models import TargetConfig, FiltersConfig, ProviderType
-from typing import List, Optional
-from pathlib import Path
-import subprocess
-from datetime import datetime
-from tqdm import tqdm
-from utils.safe_logging import log
+import re
 import os
+import subprocess
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import List, Optional
+
+import gitlab
+from tqdm import tqdm
+
+from .base import BaseRepository
+from .filters import filter_repository
+from models.config_models import TargetConfig, FiltersConfig, ProviderType
+from utils.safe_logging import log
 
 
 class GitLabProvider:
@@ -54,8 +58,8 @@ class GitLabProvider:
             if target.groups:
                 for group_name in target.groups:
                     try:
-                        group = self.client.groups.get(group_name, include_subgroups=True)
-                        projects_sources.extend(group.projects.list(all=True))
+                        group = self.client.groups.get(group_name)
+                        projects_sources.extend(group.projects.list(all=True, include_subgroups=True))
                     except Exception as e:
                         print(f"Could not fetch group {group_name}: {e}")
             
@@ -70,16 +74,19 @@ class GitLabProvider:
             
             # If no specific targets, get all accessible projects in the GitLab instance
             if not projects_sources:
-                projects_sources = self.client.projects.list(iterator=True, all=True, include_subgroups=True, with_shared=True)
+                projects_sources = self.client.projects.list(all=True, with_shared=True)
             
             # Process all projects
             total_projects = len(projects_sources)
-            for i, project in enumerate(tqdm(projects_sources, 
-                              desc="Loading projects from GitLab (this may take a while)",
-                              unit=' projects', 
-                              file=project_fetch_status_updater.status_file, 
-                              position=0,
-                              disable=project_fetch_status_updater is None), 1):
+            tqdm_kwargs = dict(
+                desc="Loading projects from GitLab (this may take a while)",
+                unit=' projects',
+                position=0,
+                disable=project_fetch_status_updater is None,
+            )
+            if project_fetch_status_updater is not None:
+                tqdm_kwargs['file'] = project_fetch_status_updater.status_file
+            for i, project in enumerate(tqdm(projects_sources, **tqdm_kwargs), 1):
                 try:
                     # Update status with progress info
                     if project_fetch_status_updater:
@@ -111,46 +118,7 @@ class GitLabProvider:
         return repositories
     
     def _should_include_repo(self, filters: Optional[FiltersConfig], repo: BaseRepository, project=None) -> bool:
-        """Comprehensive filtering logic"""
-        if not filters:
-            return True
-        
-        # Existing filters
-        if filters.is_archived is not None and repo.archived != filters.is_archived:
-            return False
-        if filters.is_fork is not None and repo.is_fork != filters.is_fork:
-            return False
-        if filters.is_personal_project is not None and repo.is_personal_project != filters.is_personal_project:
-            return False
-        if filters.max_repo_mb_size is not None and repo.size_mb > filters.max_repo_mb_size:
-            return False
-        
-        # Last commit age filter
-        if filters.last_commit_max_age is not None and repo.last_activity:
-            from datetime import datetime, timezone
-            days_since_last_commit = (datetime.now(timezone.utc) - repo.last_activity).days
-            if days_since_last_commit > filters.last_commit_max_age:
-                return False
-        
-        # Path regex filters - ignore patterns (exclude repos matching these patterns)
-        if filters.ignore_path_regexes:
-            import re
-            for pattern in filters.ignore_path_regexes:
-                if re.search(pattern, repo.full_name):
-                    return False
-        
-        # Path regex filters - must patterns (only include repos matching at least one pattern)
-        if filters.must_path_regexes:
-            import re
-            matches_required_pattern = False
-            for pattern in filters.must_path_regexes:
-                if re.search(pattern, repo.full_name):
-                    matches_required_pattern = True
-                    break
-            if not matches_required_pattern:
-                return False
-        
-        return True
+        return filter_repository(filters, repo)
     
     def get_repositories_ssh_urls(self, repositories: List[BaseRepository]) -> List[str]:
         """Get SSH URLs for all repositories"""
@@ -196,9 +164,9 @@ class GitLabProvider:
             size_mb=size_mb,
             stars=project.star_count if hasattr(project, 'star_count') else 0,
             forks=project.forks_count if hasattr(project, 'forks_count') else 0,
-            language=project.default_branch if hasattr(project, 'default_branch') else '',
+            language='',
             archived=project.archived,
-            is_fork=hasattr(project, 'forked_from_project'),
+            is_fork=getattr(project, 'forked_from_project', None) is not None,
             is_personal_project=is_personal_project,
             last_activity=last_activity,
             created_at=created_at,

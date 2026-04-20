@@ -4,18 +4,20 @@ Comprehensive tests for UnifiedRepositoryAPI.
 This test suite verifies all aspects of the UnifiedRepositoryAPI including:
 - Provider initialization for GitHub and GitLab
 - Repository fetching functionality
+- Cache hit/miss behaviour in fetch_repositories
 - URL retrieval methods
 - Repository downloading
 - Error handling and edge cases
 """
 
+import json
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch, MagicMock, call
 from pathlib import Path
 import tempfile
 import os
 
-from repolib.api import UnifiedRepositoryAPI
+from repolib.api import UnifiedRepositoryAPI, _build_cache_key
 from repolib.base import BaseRepository
 from repolib.status_updater import ProjectFetchStatusUpdater
 from models.config_models import (
@@ -500,3 +502,250 @@ class TestUnifiedRepositoryAPIIntegration:
                     assert fetched_count == 1
                     assert urls == expected_urls
                     assert unified_api.get_provider_type() == ProviderType.GITLAB
+
+
+class TestUnifiedRepositoryAPICache:
+    """Tests for the cache hit/miss behaviour in fetch_repositories."""
+
+    # ------------------------------------------------------------------ helpers
+
+    def _make_api(self, cache_backend=None, target=None, filters=None):
+        """Build a UnifiedRepositoryAPI with a mocked GitHubProvider."""
+        if target is None:
+            target = GitHubTargetConfig(organizations=['test-org'])
+        if filters is None:
+            filters = FiltersConfig(is_archived=False)
+        with patch('repolib.api.GITHUB_API_TOKEN', 'test_token'):
+            with patch('repolib.api.GitHubProvider') as mock_cls:
+                self._mock_provider = Mock()
+                mock_cls.return_value = self._mock_provider
+                api = UnifiedRepositoryAPI(
+                    filters=filters,
+                    target=target,
+                    cache_backend=cache_backend,
+                )
+        return api
+
+    def _serialised_repos(self, repos):
+        return json.dumps([r.to_dict() for r in repos])
+
+    # ------------------------------------------------------------------ fixtures
+
+    def setup_method(self):
+        self.target = GitHubTargetConfig(organizations=['test-org'])
+        self.filters = FiltersConfig(is_archived=False)
+        self.mock_repos = [
+            BaseRepository(name='r1', full_name='org/r1',
+                           clone_url='https://github.com/org/r1.git',
+                           ssh_url='git@github.com:org/r1.git'),
+            BaseRepository(name='r2', full_name='org/r2',
+                           clone_url='https://github.com/org/r2.git',
+                           ssh_url='git@github.com:org/r2.git'),
+        ]
+        self.mock_status_updater = Mock(spec=ProjectFetchStatusUpdater)
+
+    # ------------------------------------------------------------------ cache hit
+
+    def test_cache_hit_returns_correct_count(self):
+        """A warm cache entry is used and fetch_repositories returns its length."""
+        cached_json = self._serialised_repos(self.mock_repos)
+        mock_cache = Mock()
+        mock_cache.get.return_value = cached_json
+
+        api = self._make_api(cache_backend=mock_cache)
+        count = api.fetch_repositories(self.mock_status_updater)
+
+        assert count == 2
+
+    def test_cache_hit_populates_repositories(self):
+        """Repositories stored internally after a cache hit match the cached data."""
+        cached_json = self._serialised_repos(self.mock_repos)
+        mock_cache = Mock()
+        mock_cache.get.return_value = cached_json
+
+        api = self._make_api(cache_backend=mock_cache)
+        api.fetch_repositories(self.mock_status_updater)
+
+        assert len(api._repositories) == 2
+        assert api._repositories[0].name == 'r1'
+        assert api._repositories[1].name == 'r2'
+
+    def test_cache_hit_skips_provider_call(self):
+        """The upstream provider must NOT be called when there is a cache hit."""
+        cached_json = self._serialised_repos(self.mock_repos)
+        mock_cache = Mock()
+        mock_cache.get.return_value = cached_json
+
+        api = self._make_api(cache_backend=mock_cache)
+        api.fetch_repositories(self.mock_status_updater)
+
+        self._mock_provider.fetch_repositories.assert_not_called()
+
+    def test_cache_hit_does_not_write_back_to_cache(self):
+        """A cache hit must not trigger an additional setex write."""
+        cached_json = self._serialised_repos(self.mock_repos)
+        mock_cache = Mock()
+        mock_cache.get.return_value = cached_json
+
+        api = self._make_api(cache_backend=mock_cache)
+        api.fetch_repositories(self.mock_status_updater)
+
+        mock_cache.setex.assert_not_called()
+
+    def test_cache_hit_deserialises_repos_correctly(self):
+        """Repos recovered from cache have the same field values as the originals."""
+        original = BaseRepository(
+            name='myrepo', full_name='org/myrepo',
+            clone_url='https://github.com/org/myrepo.git',
+            language='Python', archived=True, stars=42, forks=7,
+        )
+        cached_json = self._serialised_repos([original])
+        mock_cache = Mock()
+        mock_cache.get.return_value = cached_json
+
+        api = self._make_api(cache_backend=mock_cache)
+        api.fetch_repositories(self.mock_status_updater)
+
+        restored = api._repositories[0]
+        assert restored.name == original.name
+        assert restored.full_name == original.full_name
+        assert restored.language == original.language
+        assert restored.archived == original.archived
+        assert restored.stars == original.stars
+        assert restored.forks == original.forks
+
+    # ------------------------------------------------------------------ cache miss
+
+    def test_cache_miss_calls_provider(self):
+        """On a cache miss the provider's fetch_repositories must be called."""
+        mock_cache = Mock()
+        mock_cache.get.return_value = None
+
+        api = self._make_api(cache_backend=mock_cache)
+        self._mock_provider.fetch_repositories.return_value = self.mock_repos
+        api.fetch_repositories(self.mock_status_updater)
+
+        self._mock_provider.fetch_repositories.assert_called_once_with(
+            self.target, self.filters, self.mock_status_updater
+        )
+
+    def test_cache_miss_writes_result_to_cache(self):
+        """After a cache miss the fetched repos must be written to the cache."""
+        mock_cache = Mock()
+        mock_cache.get.return_value = None
+
+        api = self._make_api(cache_backend=mock_cache)
+        self._mock_provider.fetch_repositories.return_value = self.mock_repos
+        api.fetch_repositories(self.mock_status_updater)
+
+        mock_cache.setex.assert_called_once()
+
+    def test_cache_miss_writes_correct_json(self):
+        """The JSON written to the cache on a miss round-trips to the original repos."""
+        mock_cache = Mock()
+        mock_cache.get.return_value = None
+
+        api = self._make_api(cache_backend=mock_cache)
+        self._mock_provider.fetch_repositories.return_value = self.mock_repos
+        api.fetch_repositories(self.mock_status_updater)
+
+        _key, _ttl, written_json = mock_cache.setex.call_args[0]
+        recovered = [BaseRepository.from_dict(r) for r in json.loads(written_json)]
+        assert len(recovered) == 2
+        assert recovered[0].name == self.mock_repos[0].name
+        assert recovered[1].name == self.mock_repos[1].name
+
+    def test_cache_miss_uses_correct_ttl(self):
+        """TTL written on a cache miss must equal API_CACHE_EXPIRE_AFTER * 7 * 24 * 3600."""
+        from configs.default_values import API_CACHE_EXPIRE_AFTER
+
+        mock_cache = Mock()
+        mock_cache.get.return_value = None
+
+        api = self._make_api(cache_backend=mock_cache)
+        self._mock_provider.fetch_repositories.return_value = self.mock_repos
+        api.fetch_repositories(self.mock_status_updater)
+
+        _key, ttl, _json = mock_cache.setex.call_args[0]
+        expected_ttl = API_CACHE_EXPIRE_AFTER * 7 * 24 * 3600
+        assert ttl == expected_ttl
+
+    def test_cache_miss_returns_correct_count(self):
+        """fetch_repositories returns the number of repos from the provider on a miss."""
+        mock_cache = Mock()
+        mock_cache.get.return_value = None
+
+        api = self._make_api(cache_backend=mock_cache)
+        self._mock_provider.fetch_repositories.return_value = self.mock_repos
+        count = api.fetch_repositories(self.mock_status_updater)
+
+        assert count == 2
+
+    # ------------------------------------------------------------------ no cache backend
+
+    def test_no_cache_backend_calls_provider(self):
+        """Without a cache backend the provider must always be called."""
+        api = self._make_api(cache_backend=None)
+        self._mock_provider.fetch_repositories.return_value = self.mock_repos
+        count = api.fetch_repositories(self.mock_status_updater)
+
+        self._mock_provider.fetch_repositories.assert_called_once()
+        assert count == 2
+
+    def test_no_cache_backend_does_not_call_cache(self):
+        """Without a cache backend no cache methods should be called."""
+        mock_cache = Mock()
+        api = self._make_api(cache_backend=None)
+        self._mock_provider.fetch_repositories.return_value = self.mock_repos
+        api.fetch_repositories(self.mock_status_updater)
+
+        mock_cache.get.assert_not_called()
+        mock_cache.setex.assert_not_called()
+
+    # ------------------------------------------------------------------ cache key
+
+    def test_cache_key_is_deterministic(self):
+        """The same target and filters always produce the same cache key."""
+        key1 = _build_cache_key(self.target, self.filters)
+        key2 = _build_cache_key(self.target, self.filters)
+        assert key1 == key2
+
+    def test_cache_key_starts_with_prefix(self):
+        """Cache key must be prefixed with 'repo_meta:'."""
+        key = _build_cache_key(self.target, self.filters)
+        assert key.startswith('repo_meta:')
+
+    def test_cache_key_differs_for_different_targets(self):
+        """Different target configurations must produce different cache keys."""
+        target_a = GitHubTargetConfig(organizations=['org-a'])
+        target_b = GitHubTargetConfig(organizations=['org-b'])
+        filters = FiltersConfig()
+        assert _build_cache_key(target_a, filters) != _build_cache_key(target_b, filters)
+
+    def test_cache_key_differs_for_different_filters(self):
+        """Different filter configurations must produce different cache keys."""
+        target = GitHubTargetConfig(organizations=['org'])
+        filters_a = FiltersConfig(is_archived=False)
+        filters_b = FiltersConfig(is_archived=True)
+        assert _build_cache_key(target, filters_a) != _build_cache_key(target, filters_b)
+
+    def test_cache_key_differs_when_filters_are_none_vs_set(self):
+        """A None filters and an explicit FiltersConfig() produce different keys."""
+        target = GitHubTargetConfig(organizations=['org'])
+        key_none = _build_cache_key(target, None)
+        key_set = _build_cache_key(target, FiltersConfig(is_archived=False))
+        assert key_none != key_set
+
+    def test_fetch_repositories_uses_same_cache_key_on_repeated_calls(self):
+        """Two calls with the same API instance hit/write the same cache key."""
+        mock_cache = Mock()
+        mock_cache.get.return_value = None
+
+        api = self._make_api(cache_backend=mock_cache)
+        self._mock_provider.fetch_repositories.return_value = self.mock_repos
+
+        api.fetch_repositories(self.mock_status_updater)
+        api.fetch_repositories(self.mock_status_updater)
+
+        get_keys = [c[0][0] for c in mock_cache.get.call_args_list]
+        assert get_keys[0] == get_keys[1]

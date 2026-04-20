@@ -4,4 +4,7 @@
 .venv/
 venv/
 
+.env
+
 .DS_Store
+certs/ca-bundle.pem

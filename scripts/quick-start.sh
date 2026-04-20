@@ -32,14 +32,14 @@ USAGE:
 OPTIONS:
     --help          Show this help
     --setup-only    Only create configuration, don't start services
-    --docker-compose Use docker-compose (simplest)
+    --docker-compose Use docker compose (simplest)
     --kubernetes    Use Kubernetes with local deployment script
     --python        Use manual Python setup
     --stop          Stop running services
     --clean         Stop and clean up everything
 
 EXAMPLES:
-    $0                        # Quick setup with docker-compose
+    $0                        # Quick setup with docker compose
     $0 --kubernetes           # Quick setup with Kubernetes
     $0 --python               # Quick setup with Python
     $0 --setup-only           # Just create config files
@@ -92,11 +92,13 @@ setup_environment() {
         cat > "$ENV_FILE" << 'EOF'
 # GSAST Environment Configuration
 
-# Required: GitHub Personal Access Token
+# At least one provider token is required.
+
+# Optional: GitHub Personal Access Token (required for GitHub scanning)
 # Create at: https://github.com/settings/tokens
 GITHUB_API_TOKEN=
 
-# Required: GitLab Configuration  
+# Optional: GitLab Configuration (required for GitLab scanning)
 GITLAB_URL=https://gitlab.com
 GITLAB_API_TOKEN=
 
@@ -110,7 +112,7 @@ EOF
     fi
     
     print_warning "IMPORTANT: You must edit .env and add your API tokens!"
-    print_info "Required tokens:"
+    print_info "Required: at least one provider token + API_SECRET_KEY"
     echo "  - GITHUB_API_TOKEN: GitHub Personal Access Token (https://github.com/settings/tokens)"
     echo "  - GITLAB_API_TOKEN: GitLab Personal Access Token (GitLab Settings > Access Tokens)"
     echo "  - API_SECRET_KEY: Any secure random string"
@@ -145,25 +147,28 @@ validate_env() {
     source "$ENV_FILE"
     
     local missing=()
-    
-    if [[ -z "$GITHUB_API_TOKEN" ]]; then
-        missing+=("GITHUB_API_TOKEN")
+
+    if [[ -z "$GITHUB_API_TOKEN" && -z "$GITLAB_API_TOKEN" ]]; then
+        missing+=("GITHUB_API_TOKEN or GITLAB_API_TOKEN")
+    else
+        if [[ -z "$GITLAB_API_TOKEN" ]]; then
+            print_warning "GITLAB_API_TOKEN is not set — GitLab scanning will be unavailable"
+        fi
+        if [[ -z "$GITHUB_API_TOKEN" ]]; then
+            print_warning "GITHUB_API_TOKEN is not set — GitHub scanning will be unavailable"
+        fi
     fi
-    
-    if [[ -z "$GITLAB_API_TOKEN" ]]; then
-        missing+=("GITLAB_API_TOKEN")  
-    fi
-    
+
     if [[ -z "$API_SECRET_KEY" ]]; then
         missing+=("API_SECRET_KEY")
     fi
-    
+
     if [[ ${#missing[@]} -gt 0 ]]; then
         print_error "Missing required environment variables: ${missing[*]}"
         print_info "Please edit $ENV_FILE and provide values for all required variables"
         return 1
     fi
-    
+
     print_success "Environment configuration is valid"
 }
 
@@ -178,11 +183,11 @@ start_docker_compose() {
     fi
     
     # Pull latest images and build
-    docker-compose pull redis
-    docker-compose build --no-cache
+    docker compose pull redis
+    docker compose build
     
     # Start services
-    docker-compose up -d
+    docker compose up -d
     
     print_success "GSAST started with Docker Compose!"
     print_info "Services starting up... this may take a moment"
@@ -202,7 +207,7 @@ start_docker_compose() {
     
     if [[ $retries -eq 0 ]]; then
         print_warning "API server didn't respond in time, but services are starting"
-        print_info "Check logs with: docker-compose logs -f"
+        print_info "Check logs with: docker compose logs -f"
     else
         print_success "API server is ready!"
     fi
@@ -266,6 +271,7 @@ start_python() {
     
     source "$ENV_FILE"
     export REDIS_URL="redis://localhost:6379"
+    export PYTHONPATH="$PROJECT_ROOT/gsast"
     
     print_info "Starting API server and worker..."
     python api_server.py &
@@ -307,7 +313,7 @@ stop_services() {
     # Stop docker-compose if running
     if [[ -f "$PROJECT_ROOT/docker-compose.yml" ]]; then
         cd "$PROJECT_ROOT"
-        docker-compose stop &> /dev/null || true
+        docker compose stop &> /dev/null || true
         print_info "Stopped Docker Compose services"
     fi
     
@@ -337,7 +343,7 @@ clean_all() {
     # Clean docker-compose
     if [[ -f "$PROJECT_ROOT/docker-compose.yml" ]]; then
         cd "$PROJECT_ROOT"
-        docker-compose down -v --remove-orphans &> /dev/null || true
+        docker compose down -v --remove-orphans &> /dev/null || true
         print_info "Cleaned Docker Compose resources"
     fi
     

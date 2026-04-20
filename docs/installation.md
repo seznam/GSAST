@@ -134,15 +134,10 @@ openssl rand -base64 32
 
 After installation, verify everything works:
 
-1. **API Health Check:**
-   ```bash
-   curl http://localhost:5000/health
-   ```
-
-2. **API Documentation:**
+1. **API Documentation:**
    Visit: http://localhost:5000/apidocs/
 
-3. **Run a Test Scan:**
+2. **Run a Test Scan:**
    ```bash
    cd gsast/
    python cli_client.py scan rules/sg_custom/ --max-repo-mb-size 10
@@ -185,11 +180,4 @@ After installation, verify everything works:
 ### Getting Help
 
 - Check logs: `docker-compose logs` or `kubectl logs -l app=gsast`
-- Review [troubleshooting guide](troubleshooting.md)
 - Open an issue on GitHub
-
-## Next Steps
-
-- [Configure your first scan](configuration.md)
-- [Learn about security rules](security-rules.md)
-- [Set up continuous scanning](continuous-scanning.md)

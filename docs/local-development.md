@@ -163,39 +163,38 @@ python api_server.py
 
 Then visit:
 - **API Documentation**: http://localhost:5000/apidocs/
-- **Health Check**: http://localhost:5000/health
-- **API Endpoints**: http://localhost:5000/
 
 Example API calls:
 ```bash
 # Start a scan
 curl -X POST http://localhost:5000/scan \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: your-api-secret-key" \
+  -H "API-SECRET-KEY: your-api-secret-key" \
   -d '{
-    "target": {
-      "provider": "github",
-      "organizations": ["your-org"]
+    "config": {
+      "target": {
+        "provider": "github",
+        "organizations": ["your-org"]
+      },
+      "scanners": ["semgrep", "trufflehog"]
     },
-    "scanners": ["semgrep", "trufflehog"]
+    "rule_files": []
   }'
 
 # Check scan status
 curl http://localhost:5000/scan/SCAN-2024-01-01-12-00-00/status \
-  -H "X-API-Key: your-api-secret-key"
+  -H "API-SECRET-KEY: your-api-secret-key"
 
 # Get results
 curl http://localhost:5000/scan/SCAN-2024-01-01-12-00-00/results \
-  -H "X-API-Key: your-api-secret-key"
+  -H "API-SECRET-KEY: your-api-secret-key"
 ```
 
 ### Working with the CLI
 
 Configure the CLI client:
 ```bash
-# Create default config
-mkdir -p ~/.config/gsast
-cat > ~/.config/gsast/config.json << EOF
+cat > ~/.gsast.json << EOF
 {
   "api_secret_key": "your-api-secret-key",
   "base_url": "http://localhost:5000",
@@ -222,32 +221,52 @@ python cli_client.py results SCAN-2024-01-01-12-00-00
 
 ### Adding New Scanners
 
-To add a new security scanner:
+Scanners are discovered via Python entry points under the `gsast.scanners` group. To add a new scanner:
 
-1. **Create scanner integration** in `sastlib/`:
+1. **Create a class** extending `ScannerInterface` from `gsast.sastlib.scanner_interface`:
    ```python
-   # sastlib/your_scanner_api.py
-   def run_scan(project_sources_dir: Path, scan_cwd: Path) -> Optional[Dict[str, Path]]:
-       # Your scanner logic here
-       pass
+   from pathlib import Path
+   from typing import Optional, Dict, List
+   from gsast.sastlib.scanner_interface import ScannerInterface, PluginMetadata, ScannerRequirement
+
+   class MyScanner(ScannerInterface):
+       @property
+       def metadata(self) -> PluginMetadata:
+           return PluginMetadata(
+               plugin_id="my-scanner",
+               name="My Scanner",
+               version="1.0.0",
+               author="Your Name",
+               description="What this scanner does",
+           )
+
+       def get_requirements(self) -> List[ScannerRequirement]:
+           return []
+
+       def validate_requirements(self, **kwargs) -> tuple[bool, Optional[str]]:
+           return True, None
+
+       def run_scan(self, project_sources_dir: Path, scan_cwd: Path, **kwargs) -> Optional[Dict[str, Path]]:
+           # Your scanner logic here
+           pass
    ```
 
-2. **Add to worker process** in `worker.py`:
-   ```python
-   from sastlib import your_scanner_api
-   
-   # Add to scanner mapping
-   SCANNERS = {
-       # ... existing scanners
-       'your-scanner': your_scanner_api.run_scan
-   }
+2. **Register the entry point** in your package's `pyproject.toml`:
+   ```toml
+   [project.entry-points."gsast.scanners"]
+   my-scanner = "my_scanner_package:MyScanner"
    ```
 
-3. **Add tests**:
+3. **Install the package** into the same virtual environment as GSAST:
+   ```bash
+   pip install -e path/to/my-scanner-package
+   ```
+   Once installed, the plugin is auto-discovered — no changes to GSAST source are required.
+
+4. **Add tests**:
    ```python
-   # tests/test_your_scanner.py
-   def test_your_scanner():
-       # Test your scanner integration
+   # tests/test_my_scanner.py
+   def test_my_scanner():
        pass
    ```
 
@@ -286,9 +305,6 @@ redis-cli llen "default"
 #### Debug API Issues
 
 ```bash
-# Check API health
-curl http://localhost:5000/health
-
 # Enable Flask debugging
 export FLASK_DEBUG=1
 python api_server.py
@@ -404,8 +420,3 @@ When contributing to the project:
 5. **Update docs**: Document new features
 6. **Submit PR**: Create pull request with clear description
 
-## Next Steps
-
-- [Learn about the API](api-reference.md)
-- [Configure security scanners](scanner-configuration.md) 
-- [Deploy to Kubernetes](kubernetes-deployment.md)
