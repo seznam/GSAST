@@ -449,7 +449,7 @@ class TestIntegrationWithExistingConfigs:
     
     def test_parse_existing_github_config(self):
         """Test parsing the existing gsast-GitHub.json file."""
-        github_json_path = Path("tests/mock/test-github.json")
+        github_json_path = Path(__file__).parent / "mock" / "test-github.json"
         
         # Load and parse the existing config
         config = GSASTConfig.from_json_file(github_json_path)
@@ -473,7 +473,7 @@ class TestIntegrationWithExistingConfigs:
         
     def test_parse_existing_gitlab_config(self):
         """Test parsing the existing gsast-GitLab.json file."""
-        gitlab_json_path = Path("tests/mock/test-gitlab.json")
+        gitlab_json_path = Path(__file__).parent / "mock" / "test-gitlab.json"
         
         # Load and parse the existing config
         config = GSASTConfig.from_json_file(gitlab_json_path)
@@ -495,7 +495,8 @@ class TestIntegrationWithExistingConfigs:
         
     def test_roundtrip_existing_configs(self):
         """Test that existing configs can be parsed and converted back to equivalent dict.""" 
-        for config_file in ["tests/mock/test-github.json", "tests/mock/test-gitlab.json"]:
+        mock_dir = Path(__file__).parent / "mock"
+        for config_file in [mock_dir / "test-github.json", mock_dir / "test-gitlab.json"]:
             # Load original
             with open(config_file, 'r') as f:
                 original_data = json.load(f)
