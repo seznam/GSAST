@@ -9,6 +9,8 @@ This guide covers deploying Global SAST Scanner to Kubernetes clusters using the
 - **Docker** (for building images)
 - **API Tokens**: GitHub and GitLab tokens (see [Installation Guide](installation.md))
 
+> The Docker image runs both the API server and the worker from the same build. The default command starts the API (`gsast-api`); the Helm chart overrides the command for the worker pod to `gsast-worker`.
+
 ## Quick Deployment
 
 ### Using the Deployment Script (Recommended)
