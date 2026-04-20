@@ -1,0 +1,99 @@
+summary: "Get scan status"
+description: |
+  Retrieves the current status of a scan including job information and progress details.
+  This endpoint provides real-time status updates for ongoing scans.
+tags:
+  - "Scanning"
+produces:
+  - "application/json"
+security:
+  - ApiKeyAuth: []
+parameters:
+  - in: "header"
+    name: "API-SECRET-KEY"
+    type: "string"
+    required: true
+    description: "API secret key for authentication"
+  - in: "path"
+    name: "scan_id"
+    type: "string"
+    required: true
+    description: "Unique identifier for the scan"
+    example: "SCAN-2024-01-15-14-30-45"
+responses:
+  200:
+    description: "Scan status retrieved successfully"
+    schema:
+      type: "object"
+      properties:
+        scan_id:
+          type: "string"
+          description: "Unique identifier for the scan"
+          example: "SCAN-2024-01-15-14-30-45"
+        message:
+          type: "string"
+          description: "Current status message"
+          example: "Waiting for jobs to finish.. Status: 5/10 finished"
+        jobs:
+          type: "object"
+          description: "Job status counts by status type"
+          properties:
+            queued:
+              type: "integer"
+              description: "Number of jobs waiting in queue"
+              example: 2
+            started:
+              type: "integer"
+              description: "Number of jobs currently running"
+              example: 3
+            finished:
+              type: "integer"
+              description: "Number of completed jobs"
+              example: 5
+            failed:
+              type: "integer"
+              description: "Number of failed jobs"
+              example: 0
+            deferred:
+              type: "integer"
+              description: "Number of deferred jobs"
+              example: 0
+            scheduled:
+              type: "integer"
+              description: "Number of scheduled jobs"
+              example: 0
+        status:
+          type: "string"
+          enum: ["started", "completed", "failed"]
+          description: "Overall scan status"
+          example: "started"
+  404:
+    description: "Scan not found"
+    schema:
+      type: "object"
+      properties:
+        error:
+          type: "string"
+          example: "Scan not found"
+  403:
+    description: "Authentication failed"
+    schema:
+      type: "object"
+      properties:
+        error:
+          type: "string"
+          example: "Invalid API-SECRET-KEY"
+  500:
+    description: "Internal server error"
+    schema:
+      type: "object"
+      properties:
+        error:
+          type: "string"
+          example: "Failed to retrieve scan status"
+
+securityDefinitions:
+  ApiKeyAuth:
+    type: "apiKey"
+    in: "header"
+    name: "API-SECRET-KEY"

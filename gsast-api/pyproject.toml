@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gsast-api"
+version = "0.1.0"
+description = "HTTP API service for GSAST: Flask routes and business logic services."
+readme = "../README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Seznam Application Security Team"}
+]
+maintainers = [
+    {name = "Seznam Application Security Team"}
+]
+keywords = [
+    "security",
+    "sast",
+    "static-analysis",
+    "vulnerability-scanner",
+    "api",
+    "flask"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance"
+]
+
+dependencies = [
+    "gsast-core",
+    "gsast-worker",
+    "flask>=2.0.0",
+    "flasgger>=0.9.7.1",
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["gsast_api"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[project.scripts]
+gsast-api = "gsast_api.app:main"
