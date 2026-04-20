@@ -35,13 +35,12 @@ tests:
           path: spec.template.spec.containers[0].imagePullPolicy
           value: IfNotPresent
 
-  - it: runs the worker python command
+  - it: runs the gsast-worker entry point command
     asserts:
       - equal:
           path: spec.template.spec.containers[0].command
           value:
-            - python3
-            - /app/gsast/worker.py
+            - gsast-worker
 
   - it: labels the pod with component gsast-worker
     asserts:

@@ -44,14 +44,12 @@ tests:
             name: http
             protocol: TCP
 
-  - it: runs the uwsgi command
+  - it: runs the gsast-api entry point command
     asserts:
       - equal:
-          path: spec.template.spec.containers[0].command[0]
-          value: uwsgi
-      - contains:
           path: spec.template.spec.containers[0].command
-          content: "0.0.0.0:5000"
+          value:
+            - gsast-api
 
   - it: labels the pod with component gsast-api
     asserts:
@@ -302,6 +300,31 @@ tests:
       - equal:
           path: spec.template.spec.containers[0].resources.requests.cpu
           value: 250m
+
+  # ── Liveness and readiness probes ─────────────────────────────────────────
+  - it: configures a TCP socket liveness probe on port 5000
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.tcpSocket.port
+          value: 5000
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.initialDelaySeconds
+          value: 15
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.periodSeconds
+          value: 20
+
+  - it: configures a TCP socket readiness probe on port 5000
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.tcpSocket.port
+          value: 5000
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.initialDelaySeconds
+          value: 10
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.periodSeconds
+          value: 5
 
   # ── Helm labels ────────────────────────────────────────────────────────────
   - it: carries standard Helm managed-by label
