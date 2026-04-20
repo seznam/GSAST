@@ -75,8 +75,6 @@ class GitHubProjectDownloader(BaseRepositoryDownloader):
 
     def _download_project(self, clone_url: str, path_to_clone_to: Path, use_shallow_clone: bool):
         """Execute git clone command"""
-        os.chdir(path_to_clone_to)
-        
         # Prepare git clone command
         args = ["git", "clone"]
         
@@ -102,7 +100,8 @@ class GitHubProjectDownloader(BaseRepositoryDownloader):
         
         try:
             result = subprocess.run(
-                args, 
+                args,
+                cwd=str(path_to_clone_to),
                 timeout=default_values.PROJECT_DOWNLOAD_TIMEOUT, 
                 check=True,
                 capture_output=True, 
@@ -145,47 +144,37 @@ class GitHubProjectDownloader(BaseRepositoryDownloader):
             
             log.info(f"Downloading project {project_path} to {final_project_dir}")
             
-            # Store original working directory
-            original_cwd = os.getcwd()
+            args = ["git", "clone"]
+            if use_shallow_clone:
+                args.extend(["--depth=1", "--single-branch"])
             
-            try:
-                # Change to the exact parent directory where we want the repo
-                os.chdir(final_project_dir.parent)
-                
-                args = ["git", "clone"]
-                if use_shallow_clone:
-                    args.extend(["--depth=1", "--single-branch"])
-                
-                # Convert SSH URLs to HTTPS if token is available for better authentication
-                if self.GITHUB_API_TOKEN and clone_url.startswith('git@github.com:'):
-                    # Convert SSH URL to HTTPS with token authentication
-                    repo_path = clone_url.split(':')[1]  # Extract owner/repo.git part
-                    auth_url = f'https://{self.GITHUB_API_TOKEN}@github.com/{repo_path}'
-                    args.extend([auth_url, final_project_dir.name])
-                    log.info(f"Converting SSH URL to HTTPS with token authentication")
-                elif self.GITHUB_API_TOKEN and clone_url.startswith('https://github.com/'):
-                    # Insert token into existing HTTPS URL
-                    auth_url = clone_url.replace('https://github.com/', f'https://{self.GITHUB_API_TOKEN}@github.com/')
-                    args.extend([auth_url, final_project_dir.name])
-                else:
-                    args.extend([clone_url, final_project_dir.name])
-                    if clone_url.startswith('git@github.com:') and not self.GITHUB_API_TOKEN:
-                        log.warning(f"SSH URL detected but no GitHub token available. This may fail if SSH keys are not configured: {clone_url}")
-                
-                result = subprocess.run(
-                    args,
-                    timeout=default_values.PROJECT_DOWNLOAD_TIMEOUT,
-                    check=True,
-                    capture_output=True,
-                    text=True
-                )
-                
-                log.info(f"Successfully downloaded {project_path}")
-                return final_project_dir
-                
-            finally:
-                # Always restore original working directory
-                os.chdir(original_cwd)
+            # Convert SSH URLs to HTTPS if token is available for better authentication
+            if self.GITHUB_API_TOKEN and clone_url.startswith('git@github.com:'):
+                # Convert SSH URL to HTTPS with token authentication
+                repo_path = clone_url.split(':')[1]  # Extract owner/repo.git part
+                auth_url = f'https://{self.GITHUB_API_TOKEN}@github.com/{repo_path}'
+                args.extend([auth_url, final_project_dir.name])
+                log.info(f"Converting SSH URL to HTTPS with token authentication")
+            elif self.GITHUB_API_TOKEN and clone_url.startswith('https://github.com/'):
+                # Insert token into existing HTTPS URL
+                auth_url = clone_url.replace('https://github.com/', f'https://{self.GITHUB_API_TOKEN}@github.com/')
+                args.extend([auth_url, final_project_dir.name])
+            else:
+                args.extend([clone_url, final_project_dir.name])
+                if clone_url.startswith('git@github.com:') and not self.GITHUB_API_TOKEN:
+                    log.warning(f"SSH URL detected but no GitHub token available. This may fail if SSH keys are not configured: {clone_url}")
+            
+            result = subprocess.run(
+                args,
+                cwd=str(final_project_dir.parent),
+                timeout=default_values.PROJECT_DOWNLOAD_TIMEOUT,
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            
+            log.info(f"Successfully downloaded {project_path}")
+            return final_project_dir
             
         except Exception as e:
             log.error(f"Error downloading project from {clone_url} to {destination_dir}: {e}")

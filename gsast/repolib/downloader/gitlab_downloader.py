@@ -64,14 +64,13 @@ class GitLabProjectDownloader(BaseRepositoryDownloader):
         return project_dir, project_parent_dir
 
     def _download_project(self, path_with_namespace: PurePath, path_to_clone_to: PurePath, use_shallow_clone: bool):
-        os.chdir(path_to_clone_to)
         download_url = f"{self.gitlab_scheme}://oauth2:{self.GITLAB_API_TOKEN}@{self.gitlab_host}/{path_with_namespace}.git"
         args = ["git", "clone"]
         if use_shallow_clone:
             args.extend(["--depth=1", "--single-branch"])
         args.append(download_url)
         try:
-            result = subprocess.run(args, timeout=default_values.PROJECT_DOWNLOAD_TIMEOUT, check=True,
+            result = subprocess.run(args, cwd=str(path_to_clone_to), timeout=default_values.PROJECT_DOWNLOAD_TIMEOUT, check=True,
                                     capture_output=True, text=True)
             log.debug(f"Git clone output: {result.stdout}")
         except subprocess.CalledProcessError as e:
@@ -106,34 +105,24 @@ class GitLabProjectDownloader(BaseRepositoryDownloader):
             
             log.info(f"Downloading project {path_with_namespace} to {final_project_dir}")
             
-            # Store original working directory
-            original_cwd = os.getcwd()
+            download_url = f"{self.gitlab_scheme}://oauth2:{self.GITLAB_API_TOKEN}@{self.gitlab_host}/{path_with_namespace}.git"
+            args = ["git", "clone"]
+            if use_shallow_clone:
+                args.extend(["--depth=1", "--single-branch"])
             
-            try:
-                # Change to the exact parent directory where we want the repo
-                os.chdir(final_project_dir.parent)
-                
-                download_url = f"{self.gitlab_scheme}://oauth2:{self.GITLAB_API_TOKEN}@{self.gitlab_host}/{path_with_namespace}.git"
-                args = ["git", "clone"]
-                if use_shallow_clone:
-                    args.extend(["--depth=1", "--single-branch"])
-                
-                args.extend([download_url, final_project_dir.name])
-                
-                result = subprocess.run(
-                    args,
-                    timeout=default_values.PROJECT_DOWNLOAD_TIMEOUT,
-                    check=True,
-                    capture_output=True,
-                    text=True
-                )
-                
-                log.info(f"Successfully downloaded {path_with_namespace}")
-                return final_project_dir
-                
-            finally:
-                # Always restore original working directory
-                os.chdir(original_cwd)
+            args.extend([download_url, final_project_dir.name])
+            
+            result = subprocess.run(
+                args,
+                cwd=str(final_project_dir.parent),
+                timeout=default_values.PROJECT_DOWNLOAD_TIMEOUT,
+                check=True,
+                capture_output=True,
+                text=True
+            )
+            
+            log.info(f"Successfully downloaded {path_with_namespace}")
+            return final_project_dir
             
         except Exception as e:
             log.error(f"Error downloading project from {project_url} to {destination_dir}: {e}")
