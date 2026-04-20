@@ -1,0 +1,94 @@
+summary: "Get available scanners"
+description: |
+  Retrieves the list of available security scanner plugins with their metadata.
+  This endpoint provides information about all scanners that can be used in scans,
+  including their descriptions, versions, and authors.
+tags:
+  - "Scanners"
+produces:
+  - "application/json"
+security:
+  - ApiKeyAuth: []
+parameters:
+  - in: "header"
+    name: "API-SECRET-KEY"
+    type: "string"
+    required: true
+    description: "API secret key for authentication"
+responses:
+  200:
+    description: "Available scanners retrieved successfully"
+    schema:
+      type: "object"
+      properties:
+        scanners:
+          type: "array"
+          description: "List of available scanner plugins"
+          items:
+            type: "object"
+            properties:
+              id:
+                type: "string"
+                description: "Unique plugin identifier"
+                example: "semgrep"
+              name:
+                type: "string"
+                description: "Human-readable scanner name"
+                example: "Semgrep"
+              version:
+                type: "string"
+                description: "Plugin version"
+                example: "1.0.0"
+              author:
+                type: "string"
+                description: "Plugin author or organization"
+                example: "GSAST Team"
+              description:
+                type: "string"
+                description: "Brief description of what the scanner does"
+                example: "Static analysis security scanner using custom and community rules"
+        count:
+          type: "integer"
+          description: "Number of available scanners"
+          example: 3
+    examples:
+      application/json:
+        scanners:
+          - id: "semgrep"
+            name: "Semgrep"
+            version: "1.0.0"
+            author: "GSAST Team"
+            description: "Static analysis security scanner using custom and community rules"
+          - id: "trufflehog"
+            name: "TruffleHog"
+            version: "1.0.0"
+            author: "GSAST Team"
+            description: "Secrets scanner that searches for high-entropy strings and credentials in git history"
+          - id: "dependency-confusion"
+            name: "Dependency Confusion Scanner"
+            version: "1.0.0"
+            author: "GSAST Team"
+            description: "Scanner that detects potential dependency confusion vulnerabilities in package manifests"
+        count: 3
+  403:
+    description: "Authentication failed"
+    schema:
+      type: "object"
+      properties:
+        error:
+          type: "string"
+          example: "Invalid API-SECRET-KEY"
+  500:
+    description: "Internal server error"
+    schema:
+      type: "object"
+      properties:
+        error:
+          type: "string"
+          example: "Failed to retrieve scanners"
+
+securityDefinitions:
+  ApiKeyAuth:
+    type: "apiKey"
+    in: "header"
+    name: "API-SECRET-KEY"

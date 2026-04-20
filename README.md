@@ -4,14 +4,34 @@ A distributed security scanning tool for GitLab and GitHub repositories that per
 
 ## Architecture
 
-The system consists of several key components:
+GSAST is split into four independent Python packages that share `gsast-core` as a common library:
 
-- **CLI Client** (`cli_client.py`): Command-line interface for interacting with the API
-- **API Server** (`api_server.py`): Flask-based REST API for managing scans
-- **Worker Process** (`worker.py`): Processes individual repository scans
-- **Repository API** (`repolib/`): Unified interface for GitHub and GitLab APIs
-- **Scanners**: Multiple security scanning engines
-- **Redis**: Used for job queues, caching, and result storage
+| Module | Package | Binary | Description |
+|---|---|---|---|
+| [gsast-core](docs/modules/core.md) | `gsast-core` | — | Shared models, config, repolib, plugin interface |
+| [gsast-api](docs/modules/api.md) | `gsast-api` | `gsast-api` | Flask REST API and scan orchestration |
+| [gsast-worker](docs/modules/worker.md) | `gsast-worker` | `gsast-worker` | RQ worker that clones repos and runs scanners |
+| [gsast-cli](docs/modules/cli.md) | `gsast-cli` | `gsast` | CLI client for submitting scans and fetching results |
+
+```
+GSAST/
+├── gsast-core/    # Shared library
+├── gsast-api/     # API server
+├── gsast-worker/  # Background worker + built-in scanner plugins
+├── gsast-cli/     # CLI client
+├── helm/          # Kubernetes Helm chart
+└── scripts/       # Deployment and utility scripts
+```
+
+**Data flow:**
+
+```
+gsast (CLI) ──POST /scan──► gsast-api ──enqueue──► Redis ──dequeue──► gsast-worker
+                                ▲                                          │
+                                └──GET /scan/{id}/results ◄── store ──────┘
+```
+
+**Infrastructure:** Redis is used for job queues (db=1), Semgrep rule blobs (db=2), scan results (db=3), and project cache (db=0).
 
 ## Quick Start
 
@@ -31,7 +51,7 @@ The system consists of several key components:
 # 2. Edit .env file with your API tokens
 vim .env
 
-# 3. Deploy to Kubernetes  
+# 3. Deploy to Kubernetes
 ./scripts/deploy-local.sh --build
 
 # 4. Access the API
@@ -46,14 +66,18 @@ For detailed installation instructions, see the [Installation Guide](docs/instal
 
 ### Quick Links
 
-- **[Kubernetes Deployment](docs/kubernetes-deployment.md)** - Deploy to Kubernetes clusters
-- **[Local Development](docs/local-development.md)** - Set up for local development  
-- **[CLI Client Only](docs/installation.md#3-cli-client-only)** - Connect to existing server
+- **[gsast-core reference](docs/modules/core.md)** — shared library, plugin interface, configuration
+- **[gsast-api reference](docs/modules/api.md)** — REST API endpoints, environment variables
+- **[gsast-worker reference](docs/modules/worker.md)** — worker setup, adding custom scanner plugins
+- **[gsast-cli reference](docs/modules/cli.md)** — all CLI commands and options
+- **[Kubernetes Deployment](docs/kubernetes-deployment.md)** — deploy to Kubernetes clusters
+- **[Local Development](docs/local-development.md)** — set up for local development
+- **[CLI Client Only](docs/installation.md#3-cli-client-only)** — connect to an existing server
 
 ### Requirements
 
 - **Docker** and **kubectl** (for Kubernetes)
-- **Python 3.9+** (for local development)  
+- **Python 3.9+** (for local development)
 - **API Tokens**: [GitHub](https://github.com/settings/tokens) and [GitLab](https://gitlab.com/-/profile/personal_access_tokens)
 
 ```json
@@ -70,115 +94,103 @@ For detailed installation instructions, see the [Installation Guide](docs/instal
 
 ## CLI Client Usage
 
-The CLI client (`cli_client.py`) is the primary interface for interacting with the Global SAST Scanner. Edit `~/.gsast.json` with your specific settings.
+The `gsast` CLI is the primary interface for interacting with the API. Edit `~/.gsast.json` with your settings (created automatically on first run).
 
 #### Start a New Scan
 
 ```bash
-python3 gsast/cli_client.py scan [OPTIONS] [RULE_PATHS...]
+gsast scan [OPTIONS] [RULE_PATHS...]
 ```
 
 **Examples:**
 
 ```bash
 # Scan with custom rules
-python3 gsast/cli_client.py scan /path/to/rules/
+gsast scan /path/to/rules/
 
 # Scan with additional filters
-python3 gsast/cli_client.py scan \
+gsast scan \
   --max-repo-mb-size 100 \
   --is-archived false \
   --last-commit-max-age 30 \
   rules/sg_custom/
 
 # Scan specific GitLab groups
-python3 gsast/cli_client.py scan \
+gsast scan \
   --group-ids "security,development" \
   --group-include-subgroups true \
   rules/sg_custom/secrets/
 ```
 
 **Available Options:**
-- `--is-archived BOOL`: Leave archived repositories unfiltered
-- `--is-fork BOOL`: Leave forked repositories unfiltered  
-- `--is-personal-project BOOL`: Leave personal projects unfiltered
+- `--is-archived BOOL`: Filter out archived repositories
+- `--is-fork BOOL`: Filter out forked repositories
+- `--is-personal-project BOOL`: Filter out personal projects
 - `--max-repo-mb-size INT`: Maximum repository size in MB
 - `--ignore-path-regexes TEXT`: Comma-separated path regexes to exclude
-- `--must-path-regexes TEXT`: Comma-separated path regexes to include
+- `--must-path-regexes TEXT`: Comma-separated path regexes to require
 - `--group-ids TEXT`: GitLab group IDs (comma-separated)
-- `--group-with-shared BOOL`: Include shared projects in groups
+- `--group-with-shared BOOL`: Include projects shared with specified groups
 - `--group-include-subgroups BOOL`: Include subgroup projects
-- `--last-commit-max-age INT`: Filter repos with last commit older than max-age (in days)
+- `--last-commit-max-age INT`: Filter repos with last commit older than max-age (days)
 
 #### Check Scan Status
 
 ```bash
-python3 gsast/cli_client.py info {SCAN-ID}
+gsast info {SCAN-ID}
 ```
 
 #### List All Scans
 
 ```bash
-python3 gsast/cli_client.py scans-status
+gsast scans-status
 ```
 
 #### Get Scan Results
 
 ```bash
-python3 gsast/cli_client.py results {SCAN-ID}
+gsast results {SCAN-ID}
 ```
 
-You can optionally filter results with query parameters equivalent to the API:
+Filter results:
 
 ```bash
 # Filter by project name/URL
-python3 gsast/cli_client.py results {SCAN-ID} --project my-repo
+gsast results {SCAN-ID} --project my-repo
 
 # Filter by scanner type
-python3 gsast/cli_client.py results {SCAN-ID} --scan semgrep
+gsast results {SCAN-ID} --scan semgrep
 
-# Use JSONPath for advanced filtering (quote the expression in the shell)
-python3 gsast/cli_client.py results {SCAN-ID} --query '$..properties.packageName'
+# Use JSONPath for advanced filtering
+gsast results {SCAN-ID} --query '$..properties.packageName'
 
 # Combine filters
-python3 gsast/cli_client.py results {SCAN-ID} \
+gsast results {SCAN-ID} \
   --project my-repo \
   --scan dependency-confusion \
   --query '$..results[*].ruleId'
 ```
 
-Notes:
-- The CLI handles URL encoding; just wrap JSONPath queries in quotes for your shell.
-
 #### List Available Scanners
 
 ```bash
-python3 gsast/cli_client.py scanners
+gsast scanners
 ```
 
 #### Management Commands
 
 ```bash
-# Clean up scan queues
-python3 gsast/cli_client.py cleanup-queues
-
-# Clean up project cache
-python3 gsast/cli_client.py cleanup-projects
+gsast cleanup-queues    # Clean up scan queues
+gsast cleanup-projects  # Clean up project cache
 ```
 
-### Configuration Options
-
-You can specify a custom configuration file:
+### Custom Config Path
 
 ```bash
-python3 gsast/cli_client.py --config {/path/to/custom-config.json} scan {rules/}
+gsast --config /path/to/custom-config.json scan rules/
 ```
 
-## Configuration File (`config.json`)
-
-The configuration file defines how the scanner connects to repositories and applies filters. Here's a comprehensive guide to all configuration attributes:
-
-### Basic Structure
+## Configuration File (`~/.gsast.json`)
 
 ```json
 {
@@ -203,47 +215,43 @@ The configuration file defines how the scanner connects to repositories and appl
 }
 ```
 
-#### Scanners Configuration (`scanners`)
-
-Available scanner types:
+#### Available Scanners
 
 | Scanner | Description |
-|---------|-------------|
+|---|---|
 | `"semgrep"` | Static code analysis using Semgrep rules |
 | `"trufflehog"` | Secrets detection in git history |
 | `"dependency-confusion"` | Dependency confusion vulnerability detection |
 
 #### Custom TruffleHog Detectors
 
-You can extend TruffleHog with custom secret detectors by placing a configuration file at `gsast/configs/trufflehog_config.yaml`. When this file is present, it is automatically passed to TruffleHog via `--config` and the custom detectors run alongside the built-in ones.
+Place a `trufflehog_config.yaml` file in your config directory. When present it is automatically passed to TruffleHog via `--config`.
 
 See the [TruffleHog custom detectors documentation](https://trufflesecurity.com/blog/trufflehog-custom-detectors) for the YAML format reference.
 
 ### How Scans Work
 
-- **Initiation**: CLI client sends scan request to API server with configuration and rules
--  **Project Discovery**: Server queries GitHub/GitLab APIs to find repositories matching target and filter criteria
--  **Job Creation**: Each repository becomes a separate job in the Redis queue
--  **Worker Processing**: Worker processes pick up jobs and perform the actual scanning:
-   - Clone repository (with or without full git history based on scanner requirements)
-   - Run configured scanners (Semgrep, TruffleHog, Dependency Confusion)
-   - Store results in Redis
--  **Result Aggregation**: Results from all repositories are available via API server
+1. **Initiation**: CLI sends a scan request (config + rule files) to `gsast-api`
+2. **Project Discovery**: API queries GitHub/GitLab to find repos matching target and filter criteria
+3. **Job Creation**: Each repository becomes a separate RQ job in the Redis task queue
+4. **Worker Processing**: `gsast-worker` instances pick up jobs and:
+   - Clone the repository
+   - Run configured scanner plugins (Semgrep, TruffleHog, Dependency Confusion)
+   - Store SARIF results in Redis
+5. **Result Aggregation**: Results from all repositories are available via the API
 
 ## API Endpoints
 
-The API server provides REST endpoints for programmatic access:
-
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/scan` | Start a new scan |
-| GET | `/scan/{scan_id}/status` | Get scan status |
-| GET | `/scan/{scan_id}/results` | Get scan results |
-| GET | `/scanners` | List available scanner plugins |
-| GET | `/queue/scans` | List all scan IDs |
-| GET | `/queue/projects` | List cached projects |
-| DELETE | `/queue/cleanup` | Clean up scan queues |
-| DELETE | `/queue/projects` | Clean up project cache |
+|---|---|---|
+| `POST` | `/scan` | Start a new scan |
+| `GET` | `/scan/{scan_id}/status` | Get scan status |
+| `GET` | `/scan/{scan_id}/results` | Get scan results |
+| `GET` | `/scanners` | List available scanner plugins |
+| `GET` | `/queue/scans` | List all scan IDs |
+| `GET` | `/queue/projects` | List cached projects |
+| `DELETE` | `/queue/cleanup` | Clean up scan queues |
+| `DELETE` | `/queue/projects` | Clean up project cache |
 
 All endpoints require the `API-SECRET-KEY` request header.
 
@@ -271,41 +279,26 @@ curl http://localhost:5000/scan/SCAN-2024-01-01-12-00-00/status \
 # List available scanners
 curl http://localhost:5000/scanners \
   -H "API-SECRET-KEY: your-api-secret-key"
-
-# List all scans
-curl http://localhost:5000/queue/scans \
-  -H "API-SECRET-KEY: your-api-secret-key"
 ```
 
 ### Result Filtering
 
-The results endpoint supports filtering:
-
-```bash
-# Get results for specific project
+```
 GET /scan/{scan_id}/results?project=my-repo
-
-# Get results from specific scanner
 GET /scan/{scan_id}/results?scan=semgrep
-
-# Use JSONPath queries for advanced filtering
 GET /scan/{scan_id}/results?query=$..properties.packageName
 ```
 
-The query param filters atrributes in the final results by providing a JSON Path. This JSON Path is applied on each separate SARIF (not the final results itself) output from scans. Using this you can display only important parts of json format.
-
-For more detailed info you can check `/apidocs/` to see and try API endpoints.
+The `query` param applies a JSONPath expression to each individual SARIF output before merging. For interactive API exploration visit `/apidocs/`.
 
 ## Deployment
 
 ### Environment Variables
 
-Key environment variables for deployment:
-
-- `REDIS_URL`: Redis connection string
-- `GITLAB_API_TOKEN`: GitLab API access token
-- `GITHUB_API_TOKEN`: GitHub API access token  
-- `API_SECRET_KEY`: API authentication key
-
-
-
+| Variable | Required | Description |
+|---|---|---|
+| `REDIS_URL` | Yes | Redis connection string |
+| `GITLAB_API_TOKEN` | One of | GitLab API access token |
+| `GITHUB_API_TOKEN` | One of | GitHub API access token |
+| `API_SECRET_KEY` | Yes | API authentication key |
+| `GITLAB_URL` | No | GitLab instance URL (default: `https://gitlab.com`) |

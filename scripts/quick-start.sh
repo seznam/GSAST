@@ -246,7 +246,7 @@ start_kubernetes() {
 start_python() {
     print_info "Starting GSAST with Python (manual setup)..."
     
-    cd "$PROJECT_ROOT/gsast"
+    cd "$PROJECT_ROOT"
     
     # Check if virtual environment exists
     if [[ ! -d "venv" ]]; then
@@ -257,7 +257,7 @@ start_python() {
     source venv/bin/activate
     
     print_info "Installing Python dependencies..."
-    pip install -e .
+    pip install -e gsast-core/ -e gsast-api/ -e gsast-worker/ -e gsast-cli/
     
     # Start Redis if needed
     if ! redis-cli ping &> /dev/null; then
@@ -271,13 +271,12 @@ start_python() {
     
     source "$ENV_FILE"
     export REDIS_URL="redis://localhost:6379"
-    export PYTHONPATH="$PROJECT_ROOT/gsast"
     
     print_info "Starting API server and worker..."
-    python api_server.py &
+    gsast-api &
     API_PID=$!
     
-    python worker.py &
+    gsast-worker &
     WORKER_PID=$!
     
     echo "$API_PID" > .api.pid
@@ -299,9 +298,8 @@ show_access_info() {
     echo "  📊 API Endpoints: http://localhost:5000/"
     echo ""
     print_info "Example CLI usage:"
-    echo "  cd gsast/"
-    echo "  python cli_client.py --help"
-    echo "  python cli_client.py scan rules/sg_custom/"
+    echo "  gsast --help"
+    echo "  gsast scan rules/sg_custom/"
     echo ""
     print_info "Stop services:"
     echo "  $0 --stop"
@@ -318,17 +316,17 @@ stop_services() {
     fi
     
     # Stop Python processes
-    if [[ -f "$PROJECT_ROOT/gsast/.api.pid" ]]; then
-        local api_pid=$(cat "$PROJECT_ROOT/gsast/.api.pid")
+    if [[ -f "$PROJECT_ROOT/.api.pid" ]]; then
+        local api_pid=$(cat "$PROJECT_ROOT/.api.pid")
         kill $api_pid &> /dev/null || true
-        rm -f "$PROJECT_ROOT/gsast/.api.pid"
+        rm -f "$PROJECT_ROOT/.api.pid"
         print_info "Stopped API server (PID: $api_pid)"
     fi
     
-    if [[ -f "$PROJECT_ROOT/gsast/.worker.pid" ]]; then
-        local worker_pid=$(cat "$PROJECT_ROOT/gsast/.worker.pid")
+    if [[ -f "$PROJECT_ROOT/.worker.pid" ]]; then
+        local worker_pid=$(cat "$PROJECT_ROOT/.worker.pid")
         kill $worker_pid &> /dev/null || true
-        rm -f "$PROJECT_ROOT/gsast/.worker.pid"
+        rm -f "$PROJECT_ROOT/.worker.pid"
         print_info "Stopped worker (PID: $worker_pid)"
     fi
     

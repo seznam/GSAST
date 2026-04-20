@@ -31,7 +31,7 @@ spec:
         - name: worker
           image: {{ .Values.image.repository | default .Values.worker.image.repositoryPrefix }}:{{ .Values.image.tag | default .Values.worker.image.tag }}
           imagePullPolicy: {{ .Values.image.pullPolicy | default .Values.worker.image.pullPolicy }}
-          command: [ "python3", "/app/gsast/worker.py" ]
+          command: [ "gsast-worker" ]
           env:
             {{- include "gsast.commonEnv" . | nindent 12 }}
             {{- include "gsast.caVolumeMounts" . | nindent 12 }}

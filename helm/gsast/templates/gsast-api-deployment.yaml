@@ -32,7 +32,7 @@ spec:
         - name: api
           image: {{ .Values.image.repository | default .Values.worker.image.repositoryPrefix }}:{{ .Values.image.tag | default .Values.worker.image.tag }}
           imagePullPolicy: {{ .Values.image.pullPolicy | default .Values.worker.image.pullPolicy }}
-          command: [ "uwsgi", "--http", "0.0.0.0:5000", "--master", "-p", "4", "--pythonpath", "/app/gsast", "-w", "api_server:app" ]
+          command: [ "gsast-api" ]
           ports:
             - name: http
               protocol: TCP
@@ -50,10 +50,23 @@ spec:
           - name: custom-gitlab-ca
             mountPath: {{ .Values.environment.customGitlabCA.caMountPath }}
           {{- end }}
+          livenessProbe:
+            tcpSocket:
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            tcpSocket:
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 5
           resources:
             {{- if .Values.api.resources }}
             {{- toYaml .Values.api.resources | nindent 12 }}
             {{- else }}
+            requests:
+              cpu: 250m
+              memory: 512Mi
             limits:
               cpu: 1500m
               memory: 2500Mi

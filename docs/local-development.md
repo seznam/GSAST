@@ -20,27 +20,47 @@ The fastest way to get started:
 ```
 
 This automatically:
-1. Creates Python virtual environment
-2. Installs dependencies
+1. Creates a Python virtual environment at the repo root
+2. Installs all modules in editable mode
 3. Starts Redis container
 4. Configures environment
 5. Starts API server and worker
 
 ### Manual Setup
 
-If you prefer step-by-step setup:
-
 #### 1. Clone and Setup Python Environment
 
 ```bash
 git clone <repository-url>
-cd global-sast-scan/gsast
+cd GSAST/
 python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -e .
 ```
 
-#### 2. Start Redis
+#### 2. Install Modules
+
+All four modules are managed as a [uv workspace](https://docs.astral.sh/uv/concepts/workspaces/) via the root `pyproject.toml`. Install them all in editable mode:
+
+```bash
+# Using pip (standard)
+pip install -e gsast-core/ -e gsast-api/ -e gsast-worker/ -e gsast-cli/
+
+# Or using uv (faster)
+uv sync
+```
+
+> Each module can also be installed independently if you only need a subset — see the per-module docs in [docs/modules/](modules/).
+
+#### 3. Install Scanner Binaries
+
+The worker requires Semgrep and TruffleHog:
+
+```bash
+pip install semgrep==1.99.0
+curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin
+```
+
+#### 4. Start Redis
 
 Redis is required for job queues and result storage:
 
@@ -48,28 +68,21 @@ Redis is required for job queues and result storage:
 # Using Docker (recommended)
 docker run -d --name gsast-redis -p 6379:6379 redis:7-alpine
 
-# Or install locally
-# macOS
-brew install redis
-redis-server
-
-# Ubuntu/Debian  
-sudo apt install redis-server
-sudo systemctl start redis-server
+# Or install locally (macOS)
+brew install redis && redis-server
 ```
 
-#### 3. Configure Environment
+#### 5. Configure Environment
 
-Copy the example environment file:
 ```bash
-cp ../env.example .env
+cp env.example .env
 ```
 
-Edit `.env` with your configuration:
+Edit `.env`:
 ```bash
 # Required
 GITHUB_API_TOKEN=ghp_your_github_token_here
-GITLAB_API_TOKEN=glpat_your_gitlab_token_here  
+GITLAB_API_TOKEN=glpat_your_gitlab_token_here
 GITLAB_URL=https://gitlab.com
 API_SECRET_KEY=your_secure_random_secret
 REDIS_URL=redis://localhost:6379
@@ -81,27 +94,23 @@ LOG_LEVEL=DEBUG
 
 Generate a secure API secret:
 ```bash
-# Using OpenSSL
 openssl rand -base64 32
-
-# Using Python
-python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
-#### 4. Load Environment and Start Services
+#### 6. Start Services
 
 ```bash
-# Load environment variables
-source .env  # or: export $(cat .env | xargs)
+# Load environment
+set -a && source .env && set +a
 
-# Start API server (Terminal 1)
-python api_server.py
+# Terminal 1 — API server
+gsast-api
 
-# Start worker (Terminal 2)  
-python worker.py
+# Terminal 2 — Worker
+gsast-worker
 
-# Use CLI client (Terminal 3)
-python cli_client.py --help
+# Terminal 3 — Use the CLI
+gsast --help
 ```
 
 ## Development Workflow
@@ -109,56 +118,68 @@ python cli_client.py --help
 ### Project Structure
 
 ```
-gsast/
-├── api_server.py          # Flask API server
-├── worker.py              # Background job processor  
-├── cli_client.py          # Command-line interface
-├── config.py              # Configuration management
-├── repolib/              # Repository API integrations
-├── sastlib/              # Security scanner integrations  
-├── models/               # Data models
-└── utils/                # Utility functions
+GSAST/
+├── gsast-core/           # Shared library (models, configs, repolib, sastlib)
+│   └── gsast_core/
+│       ├── configs/      # Environment variable resolution
+│       ├── models/       # Pydantic data models (GSASTConfig, …)
+│       ├── repolib/      # GitHub/GitLab repo discovery + download
+│       ├── sastlib/      # Plugin interface, manager, SARIF utilities
+│       └── utils/        # Logging
+│
+├── gsast-api/            # Flask API server
+│   └── gsast_api/
+│       ├── routes/       # Blueprint route handlers
+│       ├── services/     # Scan and scanner service logic
+│       ├── docs/         # Flasgger YAML spec fragments
+│       ├── app.py        # App factory + main()
+│       ├── auth.py       # Request authentication
+│       └── infra.py      # CLI arg parsing + Redis setup
+│
+├── gsast-worker/         # RQ worker + scanner plugins
+│   └── gsast_worker/
+│       ├── plugins/      # semgrep, trufflehog, dependency-confusion
+│       ├── tasks.py      # RQ task: clone → scan → store
+│       └── worker.py     # RQ Worker setup + main()
+│
+├── gsast-cli/            # CLI client
+│   └── gsast_cli/
+│       └── cli_client.py # Click commands
+│
+├── helm/                 # Kubernetes Helm chart
+├── scripts/              # Deployment and utility scripts
+└── docs/                 # Documentation
+    └── modules/          # Per-module reference docs
 ```
 
 ### Running Tests
 
 ```bash
-# Activate virtual environment
-source venv/bin/activate
-
-# Run all tests
-pytest tests/
+# Run tests for all modules
+pytest gsast-core/tests/ gsast-api/tests/ gsast-worker/tests/
 
 # Run with coverage
-pytest tests/ --cov=. --cov-report=html
+pytest gsast-core/tests/ --cov=gsast_core --cov-report=html
 
-# Run specific test file
-pytest tests/test_unified_repository_api.py -v
+# Run a specific module's tests
+cd gsast-core/ && pytest tests/ -v
+cd gsast-api/  && pytest tests/ -v
 ```
 
 ### Code Style and Linting
 
 ```bash
-# Install development dependencies
 pip install black flake8 isort mypy
 
-# Format code
-black .
-isort .
-
-# Check style
-flake8 .
-
-# Type checking
-mypy .
+black gsast-core/ gsast-api/ gsast-worker/ gsast-cli/
+isort gsast-core/ gsast-api/ gsast-worker/ gsast-cli/
+flake8 gsast-core/ gsast-api/ gsast-worker/ gsast-cli/
 ```
 
 ### Working with the API
 
-Start the API server and explore:
-
 ```bash
-python api_server.py
+gsast-api
 ```
 
 Then visit:
@@ -184,15 +205,10 @@ curl -X POST http://localhost:5000/scan \
 # Check scan status
 curl http://localhost:5000/scan/SCAN-2024-01-01-12-00-00/status \
   -H "API-SECRET-KEY: your-api-secret-key"
-
-# Get results
-curl http://localhost:5000/scan/SCAN-2024-01-01-12-00-00/results \
-  -H "API-SECRET-KEY: your-api-secret-key"
 ```
 
 ### Working with the CLI
 
-Configure the CLI client:
 ```bash
 cat > ~/.gsast.json << EOF
 {
@@ -205,109 +221,49 @@ cat > ~/.gsast.json << EOF
   "scanners": ["semgrep", "trufflehog", "dependency-confusion"]
 }
 EOF
+
+gsast scan rules/sg_custom/
+gsast info SCAN-2024-01-01-12-00-00
+gsast results SCAN-2024-01-01-12-00-00
 ```
 
-Run scans:
-```bash
-# Start a scan with custom rules
-python cli_client.py scan ../rules/sg_custom/
-
-# Check scan status
-python cli_client.py info SCAN-2024-01-01-12-00-00
-
-# Get results
-python cli_client.py results SCAN-2024-01-01-12-00-00
-```
+See the [CLI reference](modules/cli.md) for all commands and options.
 
 ### Adding New Scanners
 
-Scanners are discovered via Python entry points under the `gsast.scanners` group. To add a new scanner:
+Scanners are discovered via Python entry points under the `gsast.scanners` group. See the [worker module docs](modules/worker.md#adding-a-custom-scanner-plugin) for a step-by-step guide.
 
-1. **Create a class** extending `ScannerInterface` from `gsast.sastlib.scanner_interface`:
-   ```python
-   from pathlib import Path
-   from typing import Optional, Dict, List
-   from gsast.sastlib.scanner_interface import ScannerInterface, PluginMetadata, ScannerRequirement
+## Debugging
 
-   class MyScanner(ScannerInterface):
-       @property
-       def metadata(self) -> PluginMetadata:
-           return PluginMetadata(
-               plugin_id="my-scanner",
-               name="My Scanner",
-               version="1.0.0",
-               author="Your Name",
-               description="What this scanner does",
-           )
-
-       def get_requirements(self) -> List[ScannerRequirement]:
-           return []
-
-       def validate_requirements(self, **kwargs) -> tuple[bool, Optional[str]]:
-           return True, None
-
-       def run_scan(self, project_sources_dir: Path, scan_cwd: Path, **kwargs) -> Optional[Dict[str, Path]]:
-           # Your scanner logic here
-           pass
-   ```
-
-2. **Register the entry point** in your package's `pyproject.toml`:
-   ```toml
-   [project.entry-points."gsast.scanners"]
-   my-scanner = "my_scanner_package:MyScanner"
-   ```
-
-3. **Install the package** into the same virtual environment as GSAST:
-   ```bash
-   pip install -e path/to/my-scanner-package
-   ```
-   Once installed, the plugin is auto-discovered — no changes to GSAST source are required.
-
-4. **Add tests**:
-   ```python
-   # tests/test_my_scanner.py
-   def test_my_scanner():
-       pass
-   ```
-
-### Debugging
-
-#### Enable Debug Logging
+### Enable Debug Logging
 
 ```bash
 export LOG_LEVEL=DEBUG
 export FLASK_ENV=development
-python api_server.py
+gsast-api
 ```
 
-#### Debug Worker Issues
+### Debug Worker Issues
 
 ```bash
-# Run worker with more verbose output
 export LOG_LEVEL=DEBUG
-python worker.py
+gsast-worker
 ```
 
-#### Debug Redis Issues
+### Debug Redis Issues
 
 ```bash
-# Check Redis connection
 redis-cli ping
-
-# Monitor Redis commands
 redis-cli monitor
-
-# Check job queues
 redis-cli keys "*"
 redis-cli llen "default"
 ```
 
-#### Debug API Issues
+### Debug API Issues
 
 ```bash
-# Enable Flask debugging
 export FLASK_DEBUG=1
-python api_server.py
+gsast-api
 ```
 
 ## IDE Configuration
@@ -334,15 +290,15 @@ Create `.vscode/launch.json` for debugging:
       "name": "API Server",
       "type": "python",
       "request": "launch",
-      "program": "api_server.py",
+      "module": "gsast_api.app",
       "console": "integratedTerminal",
       "envFile": "${workspaceFolder}/.env"
     },
     {
       "name": "Worker",
-      "type": "python", 
+      "type": "python",
       "request": "launch",
-      "program": "worker.py",
+      "module": "gsast_worker.worker",
       "console": "integratedTerminal",
       "envFile": "${workspaceFolder}/.env"
     }
@@ -359,64 +315,36 @@ Create `.vscode/launch.json` for debugging:
 
 ### Common Development Issues
 
-1. **Import errors:**
+1. **Import errors after adding a new module:**
    ```bash
-   # Ensure package is installed in editable mode
-   pip install -e .
-   
-   # Check PYTHONPATH
-   export PYTHONPATH=$(pwd):$PYTHONPATH
+   pip install -e gsast-core/ -e gsast-api/ -e gsast-worker/ -e gsast-cli/
    ```
 
 2. **Redis connection errors:**
    ```bash
-   # Check if Redis is running
    redis-cli ping
-   
-   # Restart Redis container
    docker restart gsast-redis
    ```
 
 3. **Port already in use:**
    ```bash
-   # Find what's using port 5000
    lsof -i :5000
-   
-   # Kill the process
    kill -9 <PID>
-   
-   # Or use different port
+   # Or use a different port
    export FLASK_RUN_PORT=5001
    ```
 
 4. **SSL certificate errors (corporate networks):**
    ```bash
-   # Disable SSL verification for development
    export GITHUB_DISABLE_SSL_VERIFY=true
    export PYTHONHTTPSVERIFY=0
    ```
 
-### Performance Testing
-
-```bash
-# Install testing tools
-pip install locust pytest-benchmark
-
-# Load test the API
-locust -f tests/load_test.py --host=http://localhost:5000
-
-# Benchmark individual functions  
-pytest tests/test_performance.py --benchmark-only
-```
-
 ## Contributing
 
-When contributing to the project:
-
-1. **Create feature branch**: `git checkout -b feature/your-feature`
-2. **Write tests**: Add tests for new functionality
-3. **Run tests**: `pytest tests/`
+1. **Create a feature branch**: `git checkout -b feature/your-feature`
+2. **Write tests**: Add tests for new functionality in the affected module's `tests/` directory
+3. **Run tests**: `pytest gsast-core/tests/ gsast-api/tests/`
 4. **Check style**: `black . && flake8 .`
-5. **Update docs**: Document new features
+5. **Update docs**: Document new features (update the relevant `docs/modules/*.md` file)
 6. **Submit PR**: Create pull request with clear description
-
