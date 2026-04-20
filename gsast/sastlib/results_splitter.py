@@ -49,13 +49,13 @@ def split_sarif_by_rules(sarif_path: Path) -> Optional[Dict[str, Path]]:
 def convert_trufflehog_to_sarif(json_path: Path) -> Path:
     """
     Reads line-delimited Trufflehog JSON results and converts them into
-    a single SARIF file. One SARIF 'rule' is generated
-    per finding so we can store:
-      - A concise 'message' in result.message
-      - The longer text (commit link, impact, mitigation, etc.) in rule.shortDescription
+    a single SARIF file. One SARIF 'rule' is generated per unique detector type
+    (keyed by source_name + detector_name + detector_description):
+      - The rule's shortDescription contains impact, mitigation, and detector description
+      - Each finding becomes a separate 'result' referencing the shared rule
 
     The final SARIF structure:
-      - runs[0].tool.driver.rules[...] -> Each rule has an 'id' and 'shortDescription.text'
+      - runs[0].tool.driver.rules[...] -> One rule per unique detector type
       - runs[0].results[...] -> Each result references the ruleId, and has a short 'message.text'.
 
     Returns:
@@ -97,8 +97,8 @@ def convert_trufflehog_to_sarif(json_path: Path) -> Path:
 
     driver_rules = sarif_template["runs"][0]["tool"]["driver"]["rules"]
     results = []
-    rule_ids_mapper = dict() # hash to count
-    detectors_count_mapper = defaultdict(int) # detector to count
+    seen_detectors = {}  # hash_key -> rule_id
+    rule_counter = 0
 
     with open(json_path, 'r', encoding='utf-8') as f:
         for i, line in enumerate(f):
@@ -132,33 +132,33 @@ def convert_trufflehog_to_sarif(json_path: Path) -> Path:
 
             short_msg = f"Hard Coded {detector_name} Secret - {file_path}"
 
-            long_text_parts = []
-            if commit_link:
-                long_text_parts.append(f"**Commit:** {commit_link}")
-            long_text_parts.append(f"**Impact:** {impact_text}")
-            long_text_parts.append(f"**Mitigation:** {mitigation_text}")
-            if detector_desc:
-                long_text_parts.append(f"**Description:** {detector_desc}")
-
-            long_text = "\n\n".join(long_text_parts)
-
             rule_id_hash = hashlib.sha256()
-            rule_id_hash.update((detector_name).encode())
-            rule_id_hash.update((detector_desc).encode())
-            if rule_id_hash.hexdigest() in rule_ids_mapper:                
-                rule_id_seq_count = detectors_count_mapper[rule_id_hash.hexdigest()]
+            rule_id_hash.update(source_name.encode())
+            rule_id_hash.update(detector_name.encode())
+            rule_id_hash.update(detector_desc.encode())
+            hash_key = rule_id_hash.hexdigest()
+
+            if hash_key in seen_detectors:
+                rule_id = seen_detectors[hash_key]
             else:
-                detectors_count_mapper[detector_name] += 1
-                rule_id_seq_count = detectors_count_mapper[detector_name]
-                rule_ids_mapper[rule_id_hash.hexdigest()] = rule_id_seq_count
-            rule_id = f"{source_name} {rule_id_seq_count+1}"
-            driver_rules.append({
-                "id": rule_id,
-                "name": f"Trufflehog {detector_name}",
-                "shortDescription": {
-                    "text": long_text
-                },
-            })
+                rule_counter += 1
+                rule_id = f"{source_name} {rule_counter}"
+                seen_detectors[hash_key] = rule_id
+
+                long_text_parts = []
+                long_text_parts.append(f"**Impact:** {impact_text}")
+                long_text_parts.append(f"**Mitigation:** {mitigation_text}")
+                if detector_desc:
+                    long_text_parts.append(f"**Description:** {detector_desc}")
+                long_text = "\n\n".join(long_text_parts)
+
+                driver_rules.append({
+                    "id": rule_id,
+                    "name": f"Trufflehog {detector_name}",
+                    "shortDescription": {
+                        "text": long_text
+                    },
+                })
 
             sarif_result = {
                 "ruleId": rule_id,
@@ -184,6 +184,7 @@ def convert_trufflehog_to_sarif(json_path: Path) -> Path:
                 ],
                 "properties": {
                     "commit": commit_id,
+                    "commit_link": commit_link,
                     "repository": repository,
                     "verified": verified,
                     "raw_secret": raw_secret

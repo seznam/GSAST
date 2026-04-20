@@ -65,10 +65,61 @@ def test_trufflehog_to_sarif_includes_schema_field():
         assert "artifactLocation" in location["physicalLocation"]
         assert "uri" in location["physicalLocation"]["artifactLocation"]
         
-        print("✅ All TruffleHog SARIF conversion tests passed!")
+        print("Passed: TruffleHog SARIF conversion test")
         
     finally:
         # Cleanup
+        json_path.unlink()
+        if sarif_path.exists():
+            sarif_path.unlink()
+
+
+def test_trufflehog_rule_deduplication():
+    """Test that multiple findings of the same detector type share one rule, 
+    and different detector types get distinct rule IDs."""
+    
+    sample_output = (
+        '{"SourceName":"trufflehog - git","DetectorName":"PrivateKey","DetectorDescription":"PK desc","Verified":false,"Raw":"secret1","SourceMetadata":{"Data":{"Git":{"commit":"aaa","file":"file1.pem","line":1,"repository":"https://gitlab.example.com/project/repo.git"}}}}\n'
+        '{"SourceName":"trufflehog - git","DetectorName":"PrivateKey","DetectorDescription":"PK desc","Verified":false,"Raw":"secret2","SourceMetadata":{"Data":{"Git":{"commit":"bbb","file":"file2.pem","line":5,"repository":"https://gitlab.example.com/project/repo.git"}}}}\n'
+        '{"SourceName":"trufflehog - git","DetectorName":"PrivateKey","DetectorDescription":"PK desc","Verified":false,"Raw":"secret3","SourceMetadata":{"Data":{"Git":{"commit":"ccc","file":"file3.pem","line":10,"repository":"https://gitlab.example.com/project/repo.git"}}}}\n'
+        '{"SourceName":"trufflehog - git","DetectorName":"URI","DetectorDescription":"URI desc","Verified":false,"Raw":"http://user:pass@host","SourceMetadata":{"Data":{"Git":{"commit":"ddd","file":"config.js","line":20,"repository":"https://gitlab.example.com/project/repo.git"}}}}\n'
+        '{"SourceName":"trufflehog - git","DetectorName":"URI","DetectorDescription":"URI desc","Verified":false,"Raw":"http://admin:admin@host","SourceMetadata":{"Data":{"Git":{"commit":"eee","file":"env.js","line":30,"repository":"https://gitlab.example.com/project/repo.git"}}}}\n'
+    )
+    
+    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
+        f.write(sample_output)
+        json_path = Path(f.name)
+    
+    try:
+        sarif_path = convert_trufflehog_to_sarif(json_path)
+        
+        with open(sarif_path, 'r', encoding='utf-8') as f:
+            sarif_data = json.load(f)
+        
+        rules = sarif_data["runs"][0]["tool"]["driver"]["rules"]
+        results = sarif_data["runs"][0]["results"]
+        
+        assert len(results) == 5, f"Expected 5 results, got {len(results)}"
+        assert len(rules) == 2, f"Expected 2 rules (PrivateKey + URI), got {len(rules)}"
+        
+        rule_ids = [r["id"] for r in rules]
+        assert len(set(rule_ids)) == 2, f"Rule IDs should be unique, got: {rule_ids}"
+        
+        pk_rule_id = rules[0]["id"]
+        uri_rule_id = rules[1]["id"]
+        assert pk_rule_id != uri_rule_id, "PrivateKey and URI must have different rule IDs"
+        
+        pk_results = [r for r in results if r["ruleId"] == pk_rule_id]
+        uri_results = [r for r in results if r["ruleId"] == uri_rule_id]
+        assert len(pk_results) == 3, f"Expected 3 PrivateKey results, got {len(pk_results)}"
+        assert len(uri_results) == 2, f"Expected 2 URI results, got {len(uri_results)}"
+        
+        for r in results:
+            assert "commit_link" in r["properties"], "Result should have commit_link in properties"
+        
+        print("Passed: Rule deduplication test")
+        
+    finally:
         json_path.unlink()
         if sarif_path.exists():
             sarif_path.unlink()
@@ -111,4 +162,5 @@ def test_trufflehog_empty_output():
 if __name__ == "__main__":
     test_trufflehog_to_sarif_includes_schema_field()
     test_trufflehog_empty_output()
+    test_trufflehog_rule_deduplication()
 
