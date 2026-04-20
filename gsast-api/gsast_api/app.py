@@ -1,12 +1,11 @@
-import os
-
 from flasgger import Swagger
 from flask import Flask, g
 
-from gsast_core.utils import infra_cli
+from gsast_api import infra
 from gsast_api.routes.admin_routes import admin_bp
 from gsast_api.routes.result_routes import result_bp
 from gsast_api.routes.scan_routes import scan_bp
+from gsast_api.services.scanner_service import ScannerService
 
 
 def create_app() -> Flask:
@@ -23,22 +22,20 @@ def create_app() -> Flask:
 
 def init_app(app: Flask) -> None:
     """Parse CLI args / env vars, wire up Redis connections, and attach a before_request hook."""
-    cli_args = infra_cli.parse_args(
-        'Global SAST scan API. Run distributed scan on GitHub and GitLab projects'
-    )
+    cli_args = infra.parse_args()
 
-    redis_scans, _, redis_tasks, redis_rules = infra_cli.setup_redis_queues(cli_args.redis_url)
-    redis_projects = infra_cli.setup_redis_cache(cli_args.redis_url)
+    redis_scans, _, tasks_queue, redis_rules, redis_projects = infra.setup_redis(cli_args.redis_url)
 
     app.config.update(
         REDIS_SCANS=redis_scans,
-        REDIS_TASKS=redis_tasks,
+        REDIS_TASKS=tasks_queue,
         REDIS_RULES=redis_rules,
         REDIS_PROJECTS=redis_projects,
         GITLAB_URL=cli_args.gitlab_url,
         GITLAB_API_TOKEN=cli_args.gitlab_api_token,
-        GITHUB_API_TOKEN=getattr(cli_args, 'github_api_token', None) or os.getenv('GITHUB_API_TOKEN'),
+        GITHUB_API_TOKEN=cli_args.github_api_token,
         API_SECRET_KEY=cli_args.api_secret_key,
+        SCANNER_SERVICE=ScannerService(),
     )
 
     @app.before_request

@@ -6,7 +6,7 @@ from typing import Optional, Tuple
 from pathlib import Path, PurePath
 from urllib.parse import urlparse
 
-import gsast_core.configs.default_values as default_values
+import gsast_core.configs.defaults as default_values
 from gsast_core.utils.safe_logging import log
 from .base_downloader import BaseRepositoryDownloader
 

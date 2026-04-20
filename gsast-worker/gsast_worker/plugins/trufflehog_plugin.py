@@ -8,7 +8,7 @@ from typing import Optional, Dict, List
 from pathlib import Path
 
 from gsast_core.sastlib.scanner_interface import ScannerInterface, ScannerRequirement, PluginMetadata
-from gsast_core.sastlib import trufflehog_api
+from gsast_worker.plugins import trufflehog_api
 from gsast_core.utils.safe_logging import log
 
 

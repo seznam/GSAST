@@ -7,8 +7,8 @@ from .gitlab_provider import GitLabProvider
 from .base import BaseRepository
 from .status_updater import ProjectFetchStatusUpdater
 from gsast_core.models.config_models import TargetConfig, FiltersConfig, ProviderType
-from gsast_core.configs.repo_values import GITHUB_API_TOKEN, GITLAB_API_TOKEN, GITLAB_URL
-from gsast_core.configs.default_values import API_CACHE_EXPIRE_AFTER
+from gsast_core.configs.env import GITHUB_API_TOKEN, GITLAB_API_TOKEN, GITLAB_URL
+from gsast_core.configs.defaults import API_CACHE_EXPIRE_AFTER
 
 
 def _build_cache_key(target: TargetConfig, filters: Optional[FiltersConfig]) -> str:

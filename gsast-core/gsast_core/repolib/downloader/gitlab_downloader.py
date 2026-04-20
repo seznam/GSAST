@@ -5,7 +5,7 @@ import subprocess
 from typing import Optional, Tuple
 from pathlib import Path, PurePath
 
-import gsast_core.configs.default_values as default_values
+import gsast_core.configs.defaults as default_values
 from gsast_core.utils.safe_logging import log
 from urllib.parse import urlparse
 from .base_downloader import BaseRepositoryDownloader

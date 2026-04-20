@@ -1,16 +1,14 @@
 from pathlib import Path
 
 from flasgger import swag_from
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request
 
 from gsast_core.sastlib.results_storage import get_scan_results
 from gsast_api.auth import requires_api_key
-from gsast_api.services.scanner_service import ScannerService
 
 _DOCS = Path(__file__).parent.parent / 'docs'
 
 result_bp = Blueprint('result', __name__)
-_scanner_service = ScannerService()
 
 
 @result_bp.route('/scan/<scan_id>/results', methods=['GET'])
@@ -59,7 +57,8 @@ def get_scan_results_endpoint(scan_id: str):
 @requires_api_key
 def get_available_scanners():
     try:
-        scanners = _scanner_service.list_scanners()
+        scanner_service = current_app.config['SCANNER_SERVICE']
+        scanners = scanner_service.list_scanners()
         return jsonify({'scanners': scanners, 'count': len(scanners)}), 200
     except Exception as e:
         return jsonify({'error': f'Failed to retrieve scanners: {str(e)}'}), 500

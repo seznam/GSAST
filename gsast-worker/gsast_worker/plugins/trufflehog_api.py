@@ -5,7 +5,7 @@ import subprocess
 from typing import Optional, Dict
 from pathlib import Path
 
-from gsast_core.configs.repo_values import GITLAB_URL, GITHUB_URL
+from gsast_core.configs.env import GITLAB_URL, GITHUB_URL
 from gsast_core.utils.safe_logging import log
 
 from gsast_core.sastlib.results_splitter import trufflehog_to_sarif_and_split_by_source

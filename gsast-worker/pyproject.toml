@@ -42,6 +42,7 @@ classifiers = [
 
 dependencies = [
     "gsast-core",
+    "confusion-hunter",
     "rq==1.13.0",
 ]
 
@@ -53,3 +54,8 @@ packages = ["gsast_worker"]
 
 [project.scripts]
 gsast-worker = "gsast_worker.worker:main"
+
+[project.entry-points."gsast.scanners"]
+semgrep = "gsast_worker.plugins.semgrep_plugin:SemgrepPlugin"
+trufflehog = "gsast_worker.plugins.trufflehog_plugin:TrufflehogPlugin"
+dependency-confusion = "gsast_worker.plugins.dependency_confusion_plugin:DependencyConfusionPlugin"

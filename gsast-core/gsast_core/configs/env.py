@@ -6,3 +6,5 @@ GITHUB_API_TOKEN = os.getenv('GITHUB_API_TOKEN')
 GITLAB_API_TOKEN = os.getenv('GITLAB_API_TOKEN')
 RATE_LIMIT = int(os.getenv('RATE_LIMIT', 5000))
 REDIS_URL = os.getenv('REDIS_URL')
+
+API_SECRET_KEY = os.getenv('API_SECRET_KEY')

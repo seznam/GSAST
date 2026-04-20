@@ -8,12 +8,11 @@ from redis.client import Redis
 from rq import Queue, Worker
 from rq.job import Job
 
-import gsast_core.configs.default_values as default_values
+import gsast_core.configs.defaults as default_values
 from gsast_core.repolib.api import UnifiedRepositoryAPI
 from gsast_core.repolib.status_updater import ProjectFetchStatusUpdater
 from gsast_core.sastlib.ruleset_downloader import get_rule_key
 from gsast_core.utils.safe_logging import log
-from gsast_worker.tasks import process_task
 
 
 class TrackedScan:
@@ -177,7 +176,7 @@ class TrackedScan:
             self.projects_api.get_repositories_urls(),
         ):
             new_job = self.tasks_queue.enqueue(
-                process_task,
+                "gsast_worker.tasks.process_task",
                 self.scan_id,
                 project_ssh_url,
                 uploaded_rule_keys,

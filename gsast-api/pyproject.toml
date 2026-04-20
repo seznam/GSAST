@@ -40,9 +40,9 @@ classifiers = [
 
 dependencies = [
     "gsast-core",
-    "gsast-worker",
     "flask>=2.0.0",
     "flasgger>=0.9.7.1",
+    "rq==1.13.0",
 ]
 
 [tool.hatch.metadata]

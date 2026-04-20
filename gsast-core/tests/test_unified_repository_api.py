@@ -657,7 +657,7 @@ class TestUnifiedRepositoryAPICache:
 
     def test_cache_miss_uses_correct_ttl(self):
         """TTL written on a cache miss must equal API_CACHE_EXPIRE_AFTER * 7 * 24 * 3600."""
-        from gsast_core.configs.default_values import API_CACHE_EXPIRE_AFTER
+        from gsast_core.configs.defaults import API_CACHE_EXPIRE_AFTER
 
         mock_cache = Mock()
         mock_cache.get.return_value = None

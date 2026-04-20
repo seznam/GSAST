@@ -1,16 +1,28 @@
 import argparse
-import os
 import sys
 
 from redis import Redis
 from rq import Queue
 
-from gsast_core.configs import *
+from gsast_core.configs import (
+    API_SECRET_KEY,
+    GITHUB_API_TOKEN,
+    GITHUB_URL,
+    GITLAB_API_TOKEN,
+    GITLAB_URL,
+    REDIS_CACHE_DB,
+    REDIS_RULES_DB,
+    REDIS_SCANS_DB,
+    REDIS_TASKS_DB,
+    REDIS_URL,
+)
 from gsast_core.utils.safe_logging import log
 
 
-def parse_args(cli_description, is_worker=False):
-    parser = argparse.ArgumentParser(description=cli_description)
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description='Global SAST scan API. Run distributed scan on GitHub and GitLab projects'
+    )
 
     parser.add_argument('--gitlab-url',
                         help='Gitlab URL, should be set in GITLAB_URL env variable. Default: https://gitlab.com',
@@ -27,7 +39,6 @@ def parse_args(cli_description, is_worker=False):
     parser.add_argument('--redis-url',
                         help='Redis URL, should be set in REDIS_URL env variable. Example: redis://:password@host:port',
                         default=REDIS_URL)
-
     parser.add_argument('--api-secret-key',
                         help='API secret key, should be set in API_SECRET_KEY env variable',
                         default=API_SECRET_KEY)
@@ -49,22 +60,18 @@ def parse_args(cli_description, is_worker=False):
         log.error('Redis URL is not in correct format')
         sys.exit(1)
 
-    if not is_worker and not args.api_secret_key:
+    if not args.api_secret_key:
         log.error('API secret key is not set in API_SECRET_KEY env variable or --api-secret-key argument')
         sys.exit(1)
+
     return args
 
 
-def setup_redis_queues(redis_url):
-    scans_redis = Redis.from_url(redis_url, db=REDIS_SCANS_DB, decode_responses=True)  # is used for API responses
+def setup_redis(redis_url):
+    scans_redis = Redis.from_url(redis_url, db=REDIS_SCANS_DB, decode_responses=True)
     tasks_redis = Redis.from_url(redis_url, db=REDIS_TASKS_DB)
     tasks_queue = Queue('tasks', connection=tasks_redis)
     rules_redis = Redis.from_url(redis_url, db=REDIS_RULES_DB)
-
-    return scans_redis, tasks_redis, tasks_queue, rules_redis
-
-
-def setup_redis_cache(redis_url):
     projects_redis = Redis.from_url(redis_url, db=REDIS_CACHE_DB)
 
-    return projects_redis
+    return scans_redis, tasks_redis, tasks_queue, rules_redis, projects_redis

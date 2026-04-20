@@ -3,15 +3,30 @@ import sys
 import shutil
 from pathlib import Path
 
-from rq import Worker
-
-import gsast_core.repolib.downloader.gitlab_downloader as gitlab_downloader
-import gsast_core.repolib.downloader.github_downloader as github_downloader
-import gsast_core.sastlib.ruleset_downloader as ruleset_downloader
+from gsast_core.repolib import UnifiedProjectDownloader
 import gsast_core.sastlib.results_storage as results_storage
+import gsast_core.sastlib.ruleset_downloader as ruleset_downloader
 from gsast_core.sastlib.plugin_manager import plugin_manager
-from gsast_core.utils import infra_cli
 from gsast_core.utils.safe_logging import log
+
+_ctx: dict | None = None
+
+
+def init_ctx(scans_redis, rules_redis, unified_project_downloader, sast_ruleset_downloader):
+    """Called once by worker.py at startup to wire process-level resources."""
+    global _ctx
+    _ctx = {
+        'scans_redis': scans_redis,
+        'rules_redis': rules_redis,
+        'unified_project_downloader': unified_project_downloader,
+        'sast_ruleset_downloader': sast_ruleset_downloader,
+    }
+
+
+def _get_ctx() -> dict:
+    if _ctx is None:
+        raise RuntimeError('Worker context not initialized. Call init_ctx() at startup.')
+    return _ctx
 
 
 def exit_with_cleanup(project_sources_dir=None):
@@ -20,53 +35,12 @@ def exit_with_cleanup(project_sources_dir=None):
     sys.exit(1)
 
 
-def determine_provider_from_url(project_url: str) -> str:
-    """Determine if the project URL is from GitHub or GitLab."""
-    if 'github.com' in project_url:
-        return 'github'
-    elif 'gitlab' in project_url:
-        return 'gitlab'
-    else:
-        log.warning(f"Unknown repository provider for URL: {project_url}, defaulting to GitLab")
-        return 'gitlab'
-
-
-class UnifiedProjectDownloader:
-    """Unified downloader that routes to the appropriate provider-specific downloader."""
-
-    def __init__(self, gitlab_url, gitlab_api_token, github_api_token):
-        self.gitlab_downloader = gitlab_downloader.GitLabProjectDownloader(gitlab_url, gitlab_api_token)
-        self.github_downloader = github_downloader.GitHubProjectDownloader(github_api_token)
-
-    def get_project_path(self, project_url: str):
-        """Get project path using the appropriate downloader."""
-        provider = determine_provider_from_url(project_url)
-        if provider == 'github':
-            return self.github_downloader.get_project_path(project_url)
-        return self.gitlab_downloader.get_project_path(project_url)
-
-    def download_project(self, project_url: str, project_parent_dir_name: str, use_shallow_clone: bool = True):
-        """Download project using the appropriate downloader."""
-        provider = determine_provider_from_url(project_url)
-        log.info(f"Using {provider} downloader for URL: {project_url}")
-        if provider == 'github':
-            return self.github_downloader.download_project(project_url, project_parent_dir_name, use_shallow_clone)
-        return self.gitlab_downloader.download_project(project_url, project_parent_dir_name, use_shallow_clone)
-
-
-def main_cli():
-    args = infra_cli.parse_args('Process tasks from Redis', is_worker=True)
-    scans_redis, tasks_redis, tasks_queue, rules_redis = infra_cli.setup_redis_queues(args.redis_url)
-    unified_project_downloader = UnifiedProjectDownloader(
-        args.gitlab_url, args.gitlab_api_token, args.github_api_token
-    )
-    sast_ruleset_downloader = ruleset_downloader.RulesetDownloader(rules_redis)
-
-    return scans_redis, tasks_redis, tasks_queue, rules_redis, unified_project_downloader, sast_ruleset_downloader, args
-
-
 def process_task(scan_id, project_ssh_url, rule_keys, scanners, project_url=None):
-    scans_redis, tasks_redis, tasks_queue, rules_redis, unified_project_downloader, sast_ruleset_downloader, args = main_cli()
+    ctx = _get_ctx()
+    scans_redis = ctx['scans_redis']
+    rules_redis = ctx['rules_redis']
+    unified_project_downloader: UnifiedProjectDownloader = ctx['unified_project_downloader']
+    sast_ruleset_downloader: ruleset_downloader.RulesetDownloader = ctx['sast_ruleset_downloader']
 
     project_path_with_namespace = unified_project_downloader.get_project_path(project_ssh_url)
 
