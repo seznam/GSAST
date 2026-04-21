@@ -1,6 +1,6 @@
 import os
 import json
-import mock
+from unittest import mock
 import subprocess
 import datetime
 import requests
