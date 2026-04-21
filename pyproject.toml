@@ -1,0 +1,2 @@
+[tool.uv.workspace]
+members = ["gsast-core", "gsast-api", "gsast-cli", "gsast-worker"]

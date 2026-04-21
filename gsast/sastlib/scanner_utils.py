@@ -42,15 +42,18 @@ def has_findings_trufflehog(json_results_path: Path) -> bool:
     with open(json_results_path, 'r') as json_results_file:
         json_result_lines = json_results_file.readlines()
 
-    try:
-        json_results = [json.loads(line) for line in json_result_lines]
-    except json.JSONDecodeError:
-        log.error(f'Invalid JSON file: {json_results_path} with content: {json_result_lines}')
-        return False
+    json_results = []
+    for line in json_result_lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            json_results.append(json.loads(line))
+        except json.JSONDecodeError:
+            log.warning(f'Skipping invalid JSON line in {json_results_path}')
+            continue
 
-    if len(json_results):
-        return True
-    return False
+    return len(json_results) > 0
 
 
 def has_findings(results_path: Path, scan_type: str) -> bool:

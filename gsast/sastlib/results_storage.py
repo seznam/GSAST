@@ -28,14 +28,29 @@ def store_scan_results(scans_redis: Redis, scan_id: str, project_url: str, scann
         # Create the key for storing results for this project in this scan
         results_key = f"{scan_id}:results:{project_url}"
         
-        # Read and store each SARIF file
+        # Read and merge all split SARIF files into one consolidated result
         stored_results = {}
         for _, sarif_path in results_paths.items():
             try:
                 with open(sarif_path, 'r') as f:
                     sarif_content = json.load(f)
-                    stored_results[scanner_type] = sarif_content
-                    log.debug(f"Stored {scanner_type} results")
+
+                    if scanner_type not in stored_results:
+                        stored_results[scanner_type] = sarif_content
+                    else:
+                        existing = stored_results[scanner_type]
+                        existing['runs'][0]['results'].extend(
+                            sarif_content['runs'][0].get('results', [])
+                        )
+                        existing_rule_ids = {
+                            r['id'] for r in existing['runs'][0]['tool']['driver'].get('rules', [])
+                        }
+                        for rule in sarif_content['runs'][0]['tool']['driver'].get('rules', []):
+                            if rule['id'] not in existing_rule_ids:
+                                existing['runs'][0]['tool']['driver']['rules'].append(rule)
+                                existing_rule_ids.add(rule['id'])
+
+                    log.debug(f"Stored {scanner_type} results from {sarif_path}")
             except Exception as e:
                 log.error(f"Failed to read SARIF file {sarif_path}: {e}")
                 return False

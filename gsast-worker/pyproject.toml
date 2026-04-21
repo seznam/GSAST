@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gsast-worker"
+version = "0.1.0"
+description = "RQ worker service for GSAST: clones repos and runs security scanner plugins."
+readme = "../README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Seznam Application Security Team"}
+]
+maintainers = [
+    {name = "Seznam Application Security Team"}
+]
+keywords = [
+    "security",
+    "sast",
+    "static-analysis",
+    "vulnerability-scanner",
+    "worker",
+    "rq",
+    "redis"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing"
+]
+
+dependencies = [
+    "gsast-core",
+    "confusion-hunter",
+    "rq==1.13.0",
+]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["gsast_worker"]
+
+[project.scripts]
+gsast-worker = "gsast_worker.worker:main"
+
+[project.entry-points."gsast.scanners"]
+semgrep = "gsast_worker.plugins.semgrep_plugin:SemgrepPlugin"
+trufflehog = "gsast_worker.plugins.trufflehog_plugin:TrufflehogPlugin"
+dependency-confusion = "gsast_worker.plugins.dependency_confusion_plugin:DependencyConfusionPlugin"

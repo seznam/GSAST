@@ -38,7 +38,7 @@ cp env.example .env
 # 2. Edit .env with your API tokens
 vim .env
 
-# 3. Start with existing deployment script
+# 3. Start with the deployment script
 ./scripts/deploy-local.sh --build
 
 # 4. Access the API
@@ -59,18 +59,33 @@ vim .env                              # Add your tokens
 ./scripts/deploy-local.sh --port-forward  # Access the API
 ```
 
-### 2. Local Development
+### 2. Docker Compose
+
+The simplest local deployment option:
+
+```bash
+cp env.example .env
+vim .env  # Fill in API tokens and secret key
+
+docker compose up --build -d
+```
+
+This starts Redis, the API server, and one worker. Visit http://localhost:5000/apidocs/.
+
+### 3. Local Development (Python)
 
 See [Local Development Guide](local-development.md) for detailed instructions.
 
 **Quick version:**
 ```bash
-cd gsast/
-python -m venv venv
+# Create and activate a virtual environment at the repo root
+python3 -m venv venv
 source venv/bin/activate
-pip install -e .
 
-# Start Redis (required)
+# Install all modules in editable mode
+pip install -e gsast-core/ -e gsast-api/ -e gsast-worker/ -e gsast-cli/
+
+# Start Redis
 docker run -d -p 6379:6379 redis:7-alpine
 
 # Configure environment
@@ -80,19 +95,18 @@ export GITLAB_API_TOKEN="your_token"
 export GITLAB_URL="https://gitlab.com"
 export API_SECRET_KEY="your_secret"
 
-# Start services
-python api_server.py &
-python worker.py &
+# Start services (each in its own terminal)
+gsast-api   # Terminal 1 — API server on :5000
+gsast-worker  # Terminal 2 — Background worker
 ```
 
-### 3. CLI Client Only
+### 4. CLI Client Only
 
-If you only need the CLI client to connect to an existing GSAST server:
+If you only need the CLI to connect to an existing GSAST server:
 
 ```bash
-cd gsast/
-pip install .
-python cli_client.py --help
+pip install -e gsast-core/ -e gsast-cli/
+gsast --help
 ```
 
 Create `~/.gsast.json` configuration:
@@ -130,6 +144,15 @@ Generate a secure API key:
 openssl rand -base64 32
 ```
 
+## Module-Specific Installation
+
+Each module can be installed independently. See the per-module reference documentation:
+
+- [gsast-core](modules/core.md) — shared library, required by all other modules
+- [gsast-api](modules/api.md) — API server
+- [gsast-worker](modules/worker.md) — background worker
+- [gsast-cli](modules/cli.md) — CLI client
+
 ## Verification
 
 After installation, verify everything works:
@@ -139,8 +162,7 @@ After installation, verify everything works:
 
 2. **Run a Test Scan:**
    ```bash
-   cd gsast/
-   python cli_client.py scan rules/sg_custom/ --max-repo-mb-size 10
+   gsast scan rules/sg_custom/ --max-repo-mb-size 10
    ```
 
 ## Troubleshooting
@@ -149,14 +171,12 @@ After installation, verify everything works:
 
 1. **Port 5000 already in use:**
    ```bash
-   # Find what's using the port
    lsof -i :5000
-   # Kill the process or use different port
+   # Kill the process or set FLASK_RUN_PORT=5001
    ```
 
 2. **Redis connection failed:**
    ```bash
-   # Start Redis
    docker run -d -p 6379:6379 redis:7-alpine
    # Or install locally
    brew install redis && redis-server
@@ -164,20 +184,17 @@ After installation, verify everything works:
 
 3. **SSL certificate errors (corporate networks):**
    ```bash
-   # Temporarily disable SSL verification
    export GITHUB_DISABLE_SSL_VERIFY=true
-   # Or set corporate CA bundle
    export SSL_CERT_FILE=/path/to/corporate-ca.crt
    ```
 
 4. **Permission denied for Docker:**
    ```bash
-   # Add user to docker group
    sudo usermod -aG docker $USER
    # Then logout and login again
    ```
 
 ### Getting Help
 
-- Check logs: `docker-compose logs` or `kubectl logs -l app=gsast`
+- Check logs: `docker compose logs` or `kubectl logs -l app=gsast`
 - Open an issue on GitHub

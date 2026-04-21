@@ -1,0 +1,84 @@
+# Debug compose: full stack with gsast-api running under debugpy.
+# Debugpy listens on port 5678 and waits for a client to attach before starting.
+# Attach from the editor using the "gsast-api (Docker debug attach)" launch config.
+#
+# Usage:
+#   docker compose -f docker-compose.debug.yml up --build
+#   Then press F5 in the editor (select the Docker attach config).
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  gsast-worker:
+    build:
+      context: .
+      target: base
+    command: gsast-worker
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - GITHUB_API_TOKEN=${GITHUB_API_TOKEN}
+      - GITLAB_API_TOKEN=${GITLAB_API_TOKEN}
+      - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
+      - API_SECRET_KEY=${API_SECRET_KEY:-dev-secret-key-change-in-production}
+      - SSL_CERT_FILE=/app/certs/ca-bundle.pem
+      - REQUESTS_CA_BUNDLE=/app/certs/ca-bundle.pem
+      - GIT_SSL_CAINFO=/app/certs/ca-bundle.pem
+      - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./gsast-core/gsast_core:/app/gsast-core/gsast_core
+      - ./gsast-worker/gsast_worker:/app/gsast-worker/gsast_worker
+      - ./certs:/app/certs:ro
+      - scan_results:/app/results
+    restart: unless-stopped
+
+  gsast-api:
+    build:
+      context: .
+      target: debug
+    # debugpy is pre-installed in the debug build target, so we can launch
+    # directly without a runtime pip install.
+    # --wait-for-client: app won't start until the editor attaches on port 5678.
+    command: >
+      python -m debugpy --listen 0.0.0.0:5678 --wait-for-client -m gsast_api.app
+    ports:
+      - "5000:5000"
+      - "5678:5678"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - GITHUB_API_TOKEN=${GITHUB_API_TOKEN}
+      - GITLAB_API_TOKEN=${GITLAB_API_TOKEN}
+      - GITLAB_URL=${GITLAB_URL:-https://gitlab.com}
+      - API_SECRET_KEY=${API_SECRET_KEY:-dev-secret-key-change-in-production}
+      - FLASK_ENV=development
+      - SSL_CERT_FILE=/app/certs/ca-bundle.pem
+      - REQUESTS_CA_BUNDLE=/app/certs/ca-bundle.pem
+      - GIT_SSL_CAINFO=/app/certs/ca-bundle.pem
+      - LOG_LEVEL=${LOG_LEVEL:-DEBUG}
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      # Writable mounts so debugpy can read live source for breakpoints.
+      - ./gsast-core/gsast_core:/app/gsast-core/gsast_core
+      - ./gsast-api/gsast_api:/app/gsast-api/gsast_api
+      - ./certs:/app/certs:ro
+      - scan_results:/app/results
+    restart: "no"
+
+volumes:
+  redis_data:
+  scan_results:

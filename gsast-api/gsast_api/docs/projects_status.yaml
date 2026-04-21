@@ -1,0 +1,56 @@
+---
+tags:
+  - Queue
+summary: List all cached projects
+description: |
+  Retrieve a list of all cached projects stored in the projects cache.
+  Useful for validating repository discovery and cache content.
+operationId: getProjectsCache
+produces:
+  - application/json
+security:
+  - ApiKeyAuth: []
+parameters:
+  - in: header
+    name: API-SECRET-KEY
+    type: string
+    required: true
+    description: API secret key for authentication
+responses:
+  200:
+    description: A list of all cached projects.
+    schema:
+      type: object
+      properties:
+        projects:
+          type: array
+          items:
+            type: string
+    examples:
+      application/json:
+        projects:
+          - "https://gitlab.com/group/repo1.git"
+          - "https://github.com/org/repo2.git"
+  500:
+    description: Server error
+    schema:
+      type: object
+      properties:
+        error:
+          type: string
+  403:
+    description: "Authentication failed"
+    schema:
+      type: object
+      properties:
+        error:
+          type: string
+          example: "Invalid API-SECRET-KEY"
+
+securityDefinitions:
+  ApiKeyAuth:
+    type: apiKey
+    in: header
+    name: API-SECRET-KEY
+
+
