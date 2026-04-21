@@ -13,7 +13,9 @@ services:
       retries: 5
 
   gsast-api:
-    build: .
+    build:
+      context: .
+      target: base
     ports:
       - "5000:5000"
     environment:
@@ -42,7 +44,9 @@ services:
       retries: 3
 
   gsast-worker:
-    build: .
+    build:
+      context: .
+      target: base
     command: gsast-worker
     environment:
       - REDIS_URL=redis://redis:6379

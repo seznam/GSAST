@@ -169,7 +169,7 @@ check_docker_image() {
         print_info "This appears to be the default image. You have several options:"
         echo "  1. Build the image: $0 --build"
         echo "  2. Use a different image: $0 --image your-registry/gsast:tag"
-        echo "  3. Build manually: docker build -t gsast:latest $PROJECT_ROOT"
+        echo "  3. Build manually: docker build --target base -t gsast:latest $PROJECT_ROOT"
         echo ""
         print_info "For local clusters, remember to load the image after building:"
         echo "  minikube: minikube image load gsast:latest"
@@ -194,7 +194,7 @@ build_docker_image() {
     
     print_info "Building from: $project_root"
     
-    if ! docker build -t "$DOCKER_IMAGE" "$project_root"; then
+    if ! docker build --target base -t "$DOCKER_IMAGE" "$project_root"; then
         print_error "Failed to build Docker image"
         exit 1
     fi

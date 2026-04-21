@@ -1,4 +1,4 @@
-FROM python:3.10
+FROM python:3.10 AS base
 
 COPY . /app
 
@@ -20,3 +20,11 @@ RUN trufflehog --version --no-update
 
 EXPOSE 5000
 CMD ["gsast-api"]
+
+# Extends base with debugpy pre-installed so it does not need to be fetched at
+# container startup (which fails when REQUESTS_CA_BUNDLE points to a corporate
+# CA bundle that cannot verify PyPI).
+# NOTE: This is the last stage, so a plain `docker build .` produces this image.
+# Always use `--target base` for production builds (docker-compose.yml enforces this).
+FROM base AS debug
+RUN python3 -m pip install debugpy

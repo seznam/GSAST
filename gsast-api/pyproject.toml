@@ -45,6 +45,9 @@ dependencies = [
     "rq==1.13.0",
 ]
 
+[project.optional-dependencies]
+debug = ["debugpy"]
+
 [tool.hatch.metadata]
 allow-direct-references = true
 
