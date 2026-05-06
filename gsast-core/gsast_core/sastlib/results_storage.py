@@ -3,6 +3,7 @@ import time
 from typing import Dict, Optional, Any, List
 from pathlib import Path
 from redis.client import Redis
+from gsast_core.configs import REDIS_SCAN_RESULTS_TTL
 from gsast_core.utils.safe_logging import log
 
 
@@ -57,10 +58,12 @@ def store_scan_results(scans_redis: Redis, scan_id: str, project_url: str, scann
             'scanner_type': scanner_type,
             'updated_at': str(int(time.time()))
         })
+        scans_redis.expire(results_key, REDIS_SCAN_RESULTS_TTL)
 
         # Add this project to the scan's project list
         projects_key = f"{scan_id}:projects"
         scans_redis.sadd(projects_key, project_url)
+        scans_redis.expire(projects_key, REDIS_SCAN_RESULTS_TTL)
 
         log.info(f"Successfully stored {len(results_paths)} {scanner_type} results for {project_url}")
         return True
