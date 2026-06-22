@@ -45,7 +45,7 @@ class TrackedScan:
         within the same second (or even the same millisecond) do not collide.
         """
         timestamp = datetime.now().strftime('SCAN-%Y-%m-%d-%H-%M-%S-%f')[:-3]
-        return f'{timestamp}-{secrets.token_hex(2)}'
+        return f'{timestamp}-{secrets.token_hex(4)}'
 
     @staticmethod
     def get_scan_info(scan_id: str, scans_redis: Redis) -> Optional[dict]:
