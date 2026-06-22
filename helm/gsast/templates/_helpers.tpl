@@ -77,6 +77,10 @@ Common environment variables for both API and Worker
 - name: NO_PROXY
   value: {{ .Values.environment.noProxy }}
 {{- end }}
+{{- if .Values.environment.trufflehogOnlyVerified }}
+- name: TRUFFLEHOG_ONLY_VERIFIED
+  value: {{ .Values.environment.trufflehogOnlyVerified | quote }}
+{{- end }}
 - name: GITHUB_API_TOKEN
   valueFrom:
     secretKeyRef:

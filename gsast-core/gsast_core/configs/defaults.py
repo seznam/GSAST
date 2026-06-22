@@ -26,6 +26,8 @@ SERVER_CHECK_PROJECT_STATUS_INTERVAL: int = 1  # seconds
 SERVER_JOB_TIMEOUT: str = '15m'  # minutes
 SERVER_JOB_RESULT_TTL: int = 3 * 60 * 60 * 24  # seconds
 
+REDIS_SCAN_RESULTS_TTL: int = 7 * 24 * 60 * 60  # 7 days in seconds
+
 REDIS_CACHE_DB: int = 0
 REDIS_TASKS_DB: int = 1
 REDIS_RULES_DB: int = 2

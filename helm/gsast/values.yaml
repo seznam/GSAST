@@ -28,6 +28,10 @@ environment:
   httpsProxy: null
   noProxy: null
   
+  # TruffleHog configuration
+  # Set to "false" to include unverified secrets, "true" for only verified secrets
+  trufflehogOnlyVerified: "true"
+  
   # Custom GitLab CA configuration
   customGitlabCA:
     enabled: false
