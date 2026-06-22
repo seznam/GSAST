@@ -1,4 +1,5 @@
 import json
+import secrets
 
 from datetime import datetime
 from time import sleep
@@ -34,8 +35,18 @@ class TrackedScan:
         self.scanners: list = scanners
         self.created_jobs: list[Job] = []
         self.current_jobs: list[Job] = []
-        self.scan_id = datetime.now().strftime('SCAN-%Y-%m-%d-%H-%M-%S')
+        self.scan_id = self._generate_scan_id()
         self._update_scan_status('Scan initiated successfully')
+
+    @staticmethod
+    def _generate_scan_id() -> str:
+        """Build a unique scan ID.
+
+        Includes milliseconds plus a short random suffix so that scans started
+        within the same second (or even the same millisecond) do not collide.
+        """
+        timestamp = datetime.now().strftime('SCAN-%Y-%m-%d-%H-%M-%S-%f')[:-3]
+        return f'{timestamp}-{secrets.token_hex(4)}'
 
     @staticmethod
     def get_scan_info(scan_id, scans_redis) -> Optional[dict]:
