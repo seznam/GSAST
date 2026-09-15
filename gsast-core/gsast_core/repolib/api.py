@@ -8,7 +8,8 @@ from .base import BaseRepository
 from .status_updater import ProjectFetchStatusUpdater
 from gsast_core.models.config_models import TargetConfig, FiltersConfig, ProviderType
 from gsast_core.configs.env import GITHUB_API_TOKEN, GITLAB_API_TOKEN, GITLAB_URL
-from gsast_core.configs.defaults import API_CACHE_EXPIRE_AFTER
+from gsast_core.configs.defaults import API_CACHE_EXPIRE_AFTER, API_PROJECT_FETCH_LOCK_TIMEOUT
+from gsast_core.utils.safe_logging import log
 
 
 def _build_cache_key(target: TargetConfig, filters: Optional[FiltersConfig]) -> str:
@@ -49,22 +50,70 @@ class UnifiedRepositoryAPI:
         else:
             raise ValueError(f"Unsupported provider: {self.target.provider}")
 
+    def _repositories_from_cache(self, cache_key: str) -> Optional[List[BaseRepository]]:
+        cached = self.cache_backend.get(cache_key)
+        if not cached:
+            return None
+        if isinstance(cached, bytes):
+            cached = cached.decode()
+        return [BaseRepository.from_dict(r) for r in json.loads(cached)]
+
+    def _store_repositories_cache(self, cache_key: str, repositories: List[BaseRepository]) -> None:
+        ttl = API_CACHE_EXPIRE_AFTER * 7 * 24 * 3600
+        self.cache_backend.setex(cache_key, ttl, json.dumps([r.to_dict() for r in repositories]))
+
+    def _acquire_fetch_lock(self, cache_key: str):
+        """Serialize instance-wide GitLab fetches so concurrent scans share one fill.
+
+        Returns a no-arg release callable. Always safe to call.
+        """
+        lock_factory = getattr(self.cache_backend, 'lock', None)
+        if not callable(lock_factory):
+            return lambda: None
+        try:
+            lock = lock_factory(
+                f'{cache_key}:lock',
+                timeout=API_PROJECT_FETCH_LOCK_TIMEOUT,
+                blocking_timeout=API_PROJECT_FETCH_LOCK_TIMEOUT,
+            )
+            acquired = lock.acquire(blocking=True)
+            if not acquired:
+                log.warning('Could not acquire project-fetch lock; fetching without exclusivity')
+                return lambda: None
+            return lock.release
+        except Exception as e:
+            log.warning(f'Project-fetch lock unavailable: {e}')
+            return lambda: None
+
     def fetch_repositories(self, project_fetch_status_updater: ProjectFetchStatusUpdater) -> int:
         """Fetch repositories based on target configuration and filters - returns COUNT"""
         cache_key = _build_cache_key(self.target, self.filters)
 
         if self.cache_backend:
-            cached = self.cache_backend.get(cache_key)
-            if cached:
-                self._repositories = [BaseRepository.from_dict(r) for r in json.loads(cached)]
+            cached = self._repositories_from_cache(cache_key)
+            if cached is not None:
+                self._repositories = cached
                 return len(self._repositories)
 
-        self._repositories = self.provider.fetch_repositories(self.target, self.filters, project_fetch_status_updater)
+            release_lock = self._acquire_fetch_lock(cache_key)
+            try:
+                cached = self._repositories_from_cache(cache_key)
+                if cached is not None:
+                    self._repositories = cached
+                    return len(self._repositories)
 
-        if self.cache_backend:
-            ttl = API_CACHE_EXPIRE_AFTER * 7 * 24 * 3600
-            self.cache_backend.setex(cache_key, ttl, json.dumps([r.to_dict() for r in self._repositories]))
+                self._repositories = self.provider.fetch_repositories(
+                    self.target, self.filters, project_fetch_status_updater
+                )
+                if self._repositories:
+                    self._store_repositories_cache(cache_key, self._repositories)
+            finally:
+                release_lock()
+            return len(self._repositories)
 
+        self._repositories = self.provider.fetch_repositories(
+            self.target, self.filters, project_fetch_status_updater
+        )
         return len(self._repositories)
 
     def get_repositories_ssh_urls(self) -> List[str]:

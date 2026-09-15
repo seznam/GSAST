@@ -71,6 +71,29 @@ class TrackedScan:
                 scan_ids.append(key)
         return scan_ids
 
+    @staticmethod
+    def fail_orphaned_scans(scans_redis: Redis) -> int:
+        """Mark scans left in 'started' as failed.
+
+        Scan work runs in a child process of the API pod. An API restart (including
+        OOMKill) leaves Redis entries stuck at 'Fetching projects' forever.
+        """
+        failed = 0
+        for scan_id in TrackedScan.get_all_scans(scans_redis):
+            status = scans_redis.hget(scan_id, 'status')
+            if isinstance(status, bytes):
+                status = status.decode()
+            if status != 'started':
+                continue
+            scans_redis.hset(scan_id, mapping={
+                'message': 'Scan interrupted because the API process restarted',
+                'status': 'failed',
+            })
+            failed += 1
+        if failed:
+            log.warning(f'Marked {failed} orphaned scan(s) as failed after API startup')
+        return failed
+
     def _upload_rules(self) -> List[str]:
         rule_keys = []
         for rule_file in self.rule_files:
@@ -166,7 +189,11 @@ class TrackedScan:
             default_values.SERVER_CHECK_PROJECT_STATUS_INTERVAL,
             self._update_scan_status,
         )
-        fetched_projects_count = self.projects_api.fetch_repositories(project_fetch_status_updater)
+        try:
+            fetched_projects_count = self.projects_api.fetch_repositories(project_fetch_status_updater)
+        except Exception as e:
+            self._update_scan_status(f'Error fetching projects: {e}', is_error=True)
+            return
         self._update_scan_status(f'Fetched {fetched_projects_count} projects')
 
         if not fetched_projects_count:

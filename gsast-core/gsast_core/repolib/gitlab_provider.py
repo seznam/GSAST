@@ -1,12 +1,10 @@
-import re
 import os
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Iterator, List, Optional
 
 import gitlab
-from tqdm import tqdm
 
 from .base import BaseRepository
 from .filters import filter_repository
@@ -44,77 +42,113 @@ class GitLabProvider:
         except Exception as e:
             raise ValueError(f"GitLab authentication failed: {e}")
 
+    @staticmethod
+    def _base_list_kwargs(filters: Optional[FiltersConfig]) -> dict:
+        """Common python-gitlab list() kwargs: stream pages, never materialize all=True."""
+        kwargs = {'iterator': True, 'per_page': 100}
+        if filters is not None and filters.is_archived is not None:
+            kwargs['archived'] = filters.is_archived
+        return kwargs
+
+    def _list_projects(self, manager, filters: Optional[FiltersConfig], extra_kwargs: Optional[dict] = None):
+        """List projects as a generator.
+
+        Prefer GitLab keyset pagination so large instances (>10k projects, where
+        X-Total is omitted) do not load every REST object into memory.
+        """
+        kwargs = {**self._base_list_kwargs(filters), **(extra_kwargs or {})}
+        try:
+            return manager.list(pagination='keyset', order_by='id', **kwargs)
+        except TypeError:
+            return manager.list(**kwargs)
+        except Exception as e:
+            log.warning(f'GitLab keyset listing failed ({e}); falling back to offset pagination')
+            return manager.list(**kwargs)
+
+    def _iter_project_sources(self, target: TargetConfig, filters: Optional[FiltersConfig]) -> Iterator:
+        """Yield GitLab project objects without accumulating them in a list."""
+        yielded = False
+
+        if target.groups:
+            for group_name in target.groups:
+                try:
+                    group = self.client.groups.get(group_name)
+                    for project in self._list_projects(
+                        group.projects, filters, {'include_subgroups': True}
+                    ):
+                        yielded = True
+                        yield project
+                except Exception as e:
+                    log.warning(f'Could not fetch group {group_name}: {e}')
+
+        if target.repositories:
+            for repo_name in target.repositories:
+                try:
+                    yielded = True
+                    yield self.client.projects.get(repo_name)
+                except Exception as e:
+                    log.warning(f'Could not fetch repository {repo_name}: {e}')
+
+        if not yielded and not target.groups and not target.repositories:
+            yield from self._list_projects(
+                self.client.projects, filters, {'with_shared': True}
+            )
+
+    @staticmethod
+    def _needs_repository_size(filters: Optional[FiltersConfig]) -> bool:
+        return filters is not None and filters.max_repo_mb_size is not None
+
+    def _hydrate_project_if_needed(self, project, filters: Optional[FiltersConfig]):
+        """GET /projects/:id only when the size filter needs statistics the list payload lacks."""
+        if not self._needs_repository_size(filters):
+            return project
+        statistics = getattr(project, 'statistics', None)
+        if statistics:
+            return project
+        return self.client.projects.get(project.id, statistics=True)
+
     def fetch_repositories(self, target: TargetConfig, filters: Optional[FiltersConfig], project_fetch_status_updater) -> List[BaseRepository]:
         """Fetch GitLab repositories based on target configuration"""
 
         if target.provider != ProviderType.GITLAB:
             raise ValueError("GitLab provider can only handle GitLab targets")
 
-        repositories = []
-        projects_sources = []
+        repositories: List[BaseRepository] = []
+        processed = 0
 
         try:
-            # Handle groups
-            if target.groups:
-                for group_name in target.groups:
-                    try:
-                        group = self.client.groups.get(group_name)
-                        projects_sources.extend(group.projects.list(all=True, include_subgroups=True))
-                    except Exception as e:
-                        print(f"Could not fetch group {group_name}: {e}")
-
-            # Handle specific repositories
-            if target.repositories:
-                for repo_name in target.repositories:
-                    try:
-                        project = self.client.projects.get(repo_name)
-                        projects_sources.append(project)
-                    except Exception as e:
-                        print(f"Could not fetch repository {repo_name}: {e}")
-
-            # If no specific targets, get all accessible projects in the GitLab instance
-            if not projects_sources:
-                projects_sources = self.client.projects.list(all=True, with_shared=True)
-
-            # Process all projects
-            total_projects = len(projects_sources)
-            tqdm_kwargs = dict(
-                desc="Loading projects from GitLab (this may take a while)",
-                unit=' projects',
-                position=0,
-                disable=project_fetch_status_updater is None,
-            )
-            if project_fetch_status_updater is not None:
-                tqdm_kwargs['file'] = project_fetch_status_updater.status_file
-            for i, project in enumerate(tqdm(projects_sources, **tqdm_kwargs), 1):
+            for project in self._iter_project_sources(target, filters):
+                processed += 1
                 try:
-                    # Update status with progress info
-                    if project_fetch_status_updater:
-                        progress_message = f"Fetching projects {i}/{total_projects}"
-                        project_fetch_status_updater.update_callback(progress_message)
+                    if project_fetch_status_updater and processed % 50 == 1:
+                        project_fetch_status_updater.update_callback(
+                            f'Fetching projects ({processed} processed, {len(repositories)} matched)'
+                        )
 
-                    # Get full project details if needed
-                    if not hasattr(project, 'statistics'):
-                        full_project = self.client.projects.get(project.id, statistics=True)
-                    else:
-                        full_project = project
-
-                    # Convert GitLab project to BaseRepository
+                    full_project = self._hydrate_project_if_needed(project, filters)
                     repo_info = self._convert_gitlab_project(full_project)
-                    log.info(f"Repo info: {repo_info}")
+                    log.debug(f'Repo info: {repo_info}')
 
-                    # Apply filters if provided
                     if self._should_include_repo(filters, repo_info, full_project):
                         repositories.append(repo_info)
 
+                    if processed % 500 == 0:
+                        log.info(
+                            f'GitLab fetch progress: {processed} processed, {len(repositories)} matched'
+                        )
                 except Exception as e:
-                    print(f"Error processing project {project.path_with_namespace}: {e}")
+                    name = getattr(project, 'path_with_namespace', getattr(project, 'id', '?'))
+                    log.warning(f'Error processing project {name}: {e}')
                     continue
-
         except Exception as e:
-            print(f"Error fetching GitLab repositories: {e}")
-            return []
+            log.error(f'Error fetching GitLab repositories: {e}')
+            raise
 
+        if project_fetch_status_updater:
+            project_fetch_status_updater.update_callback(
+                f'Fetching projects ({processed} processed, {len(repositories)} matched)'
+            )
+        log.info(f'GitLab fetch finished: {processed} processed, {len(repositories)} matched')
         return repositories
 
     def _should_include_repo(self, filters: Optional[FiltersConfig], repo: BaseRepository, project=None) -> bool:
@@ -124,54 +158,68 @@ class GitLabProvider:
         """Get SSH URLs for all repositories"""
         return [repo.ssh_url for repo in repositories if repo.ssh_url]
 
+    @staticmethod
+    def _namespace_info(namespace) -> tuple:
+        """Return (owner_path, is_personal_project) from a dict or REST object."""
+        if not namespace:
+            return '', False
+        if isinstance(namespace, dict):
+            return namespace.get('path', '') or '', namespace.get('kind') == 'user'
+        return getattr(namespace, 'path', '') or '', getattr(namespace, 'kind', None) == 'user'
+
+    @staticmethod
+    def _parse_gitlab_datetime(value, project, field_label: str):
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+        except Exception as e:
+            name = getattr(project, 'path_with_namespace', getattr(project, 'id', '?'))
+            log.error(f'Error parsing {field_label} of project {name}: {e}')
+            return None
+
+    @staticmethod
+    def _repository_size_mb(project) -> float:
+        try:
+            statistics = getattr(project, 'statistics', None)
+            if not statistics:
+                return 0
+            if isinstance(statistics, dict):
+                repo_size = statistics.get('repository_size', 0) or 0
+            else:
+                repo_size = getattr(statistics, 'repository_size', 0) or 0
+            return repo_size / (1024 * 1024)
+        except Exception as e:
+            name = getattr(project, 'path_with_namespace', getattr(project, 'id', '?'))
+            log.error(f'Error calculating size of project {name}: {e}')
+            return 0
+
     def _convert_gitlab_project(self, project) -> BaseRepository:
         """Convert GitLab project to BaseRepository"""
-
-        # Calculate size in MB
-        size_mb = 0
-        try:
-            if hasattr(project, 'statistics') and project.statistics:
-                size_mb = project.statistics.get('repository_size', 0) / (1024 * 1024)
-        except Exception as e:
-            log.error(f"Error calculating size of project {project.path_with_namespace}: {e}")
-
-        # Parse last activity date
-        last_activity = None
-        try:
-            if project.last_activity_at:
-                last_activity = datetime.fromisoformat(project.last_activity_at.replace('Z', '+00:00'))
-        except Exception as e:
-            log.error(f"Error parsing last activity of project {project.path_with_namespace}: {e}")
-
-        # Parse created date
-        created_at = None
-        try:
-            if project.created_at:
-                created_at = datetime.fromisoformat(project.created_at.replace('Z', '+00:00'))
-        except Exception as e:
-            log.error(f"Error parsing created date of project {project.path_with_namespace}: {e}")
-
-        namespace = project.namespace if hasattr(project, 'namespace') and project.namespace else {}
-        is_personal_project = namespace.get('kind') == 'user'
+        owner, is_personal_project = self._namespace_info(getattr(project, 'namespace', None))
 
         return BaseRepository(
-            name=project.name,
-            full_name=project.path_with_namespace,
-            description=project.description or '',
-            clone_url=project.http_url_to_repo,
-            ssh_url=project.ssh_url_to_repo,
-            web_url=project.web_url,
-            size_mb=size_mb,
-            stars=project.star_count if hasattr(project, 'star_count') else 0,
-            forks=project.forks_count if hasattr(project, 'forks_count') else 0,
+            name=getattr(project, 'name', ''),
+            full_name=getattr(project, 'path_with_namespace', ''),
+            description=getattr(project, 'description', None) or '',
+            clone_url=getattr(project, 'http_url_to_repo', ''),
+            ssh_url=getattr(project, 'ssh_url_to_repo', ''),
+            web_url=getattr(project, 'web_url', ''),
+            size_mb=self._repository_size_mb(project),
+            stars=getattr(project, 'star_count', 0) or 0,
+            forks=getattr(project, 'forks_count', 0) or 0,
             language='',
-            archived=project.archived,
+            archived=bool(getattr(project, 'archived', False)),
             is_fork=getattr(project, 'forked_from_project', None) is not None,
             is_personal_project=is_personal_project,
-            last_activity=last_activity,
-            created_at=created_at,
-            owner=namespace.get('path', ''),
-            private=project.visibility == 'private'
+            last_activity=self._parse_gitlab_datetime(
+                getattr(project, 'last_activity_at', None), project, 'last activity'
+            ),
+            created_at=self._parse_gitlab_datetime(
+                getattr(project, 'created_at', None), project, 'created date'
+            ),
+            owner=owner,
+            private=getattr(project, 'visibility', None) == 'private',
         )
 
     def download_repository(self, repo: BaseRepository, destination: Path, shallow: bool = True) -> bool:
@@ -198,12 +246,12 @@ class GitLabProvider:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
             if result.returncode == 0:
-                print(f"Successfully downloaded {repo.full_name}")
+                log.info(f"Successfully downloaded {repo.full_name}")
                 return True
             else:
-                print(f"Failed to download {repo.full_name}: {result.stderr}")
+                log.error(f"Failed to download {repo.full_name}: {result.stderr}")
                 return False
 
         except Exception as e:
-            print(f"Error downloading {repo.full_name}: {e}")
+            log.error(f"Error downloading {repo.full_name}: {e}")
             return False
