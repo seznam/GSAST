@@ -16,6 +16,7 @@ GITLAB_PROJECT_GROUP_WITH_SHARED: bool = False  # include projects shared with s
 GITLAB_PROJECT_GROUP_INCLUDE_SUBGROUPS: bool = True  # include projects in subgroups of specified group IDs
 
 API_CACHE_EXPIRE_AFTER: int = 4  # how many weeks to use cached GitHub and GitLab API responses about existing projects
+API_PROJECT_FETCH_LOCK_TIMEOUT: int = 30 * 60  # seconds to wait for / hold the repo-list cache lock
 
 PROJECT_DOWNLOAD_TIMEOUT: int = 60 * 5  # seconds
 SERVER_WAIT_FOR_WORKERS_TIMEOUT: int = 120  # seconds
