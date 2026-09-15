@@ -640,6 +640,45 @@ class TestUnifiedRepositoryAPICache:
 
         mock_cache.setex.assert_called_once()
 
+    def test_empty_fetch_does_not_poison_cache(self):
+        """A zero-repo fetch must not be cached, or later scans would keep seeing nothing."""
+        mock_cache = Mock()
+        mock_cache.get.return_value = None
+
+        api = self._make_api(cache_backend=mock_cache)
+        self._mock_provider.fetch_repositories.return_value = []
+        count = api.fetch_repositories(self.mock_status_updater)
+
+        assert count == 0
+        mock_cache.setex.assert_not_called()
+
+    def test_cache_miss_acquires_and_releases_lock(self):
+        mock_cache = Mock()
+        mock_cache.get.return_value = None
+        lock = Mock()
+        lock.acquire.return_value = True
+        mock_cache.lock.return_value = lock
+
+        api = self._make_api(cache_backend=mock_cache)
+        self._mock_provider.fetch_repositories.return_value = self.mock_repos
+        api.fetch_repositories(self.mock_status_updater)
+
+        mock_cache.lock.assert_called_once()
+        lock.acquire.assert_called_once_with(blocking=True)
+        lock.release.assert_called_once()
+
+    def test_second_waiter_uses_cache_filled_by_lock_holder(self):
+        mock_cache = Mock()
+        cached_json = self._serialised_repos(self.mock_repos)
+        mock_cache.get.side_effect = [None, cached_json]
+
+        api = self._make_api(cache_backend=mock_cache)
+        count = api.fetch_repositories(self.mock_status_updater)
+
+        assert count == 2
+        self._mock_provider.fetch_repositories.assert_not_called()
+        mock_cache.setex.assert_not_called()
+
     def test_cache_miss_writes_correct_json(self):
         """The JSON written to the cache on a miss round-trips to the original repos."""
         mock_cache = Mock()
