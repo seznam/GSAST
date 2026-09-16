@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "global-sast-scan"
 version = "0.1.0"
 description = "A distributed security scanning tool for GitLab and GitHub repositories that performs Static Application Security Testing (SAST) using multiple security scanners including Semgrep, Trufflehog, and Confusion Hunter."
-readme = "../README.md"
+readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [

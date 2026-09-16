@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "gsast-api"
 version = "0.1.0"
 description = "HTTP API service for GSAST: Flask routes and business logic services."
-readme = "../README.md"
+readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [

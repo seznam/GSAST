@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "gsast-core"
 version = "0.1.0"
 description = "Shared library for GSAST: models, configs, repolib, sastlib, and utilities."
-readme = "../README.md"
+readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [

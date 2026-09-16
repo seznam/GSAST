@@ -38,6 +38,9 @@ def init_app(app: Flask) -> None:
         SCANNER_SERVICE=ScannerService(),
     )
 
+    from gsast_api.services.scan_service import TrackedScan
+    TrackedScan.fail_orphaned_scans(redis_scans)
+
     @app.before_request
     def _inject_globals():
         g.redis_scans = app.config['REDIS_SCANS']
