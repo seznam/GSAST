@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "gsast-worker"
 version = "0.1.0"
 description = "RQ worker service for GSAST: clones repos and runs security scanner plugins."
-readme = "../README.md"
+readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [

@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "gsast-cli"
 version = "0.1.0"
 description = "CLI HTTP client for GSAST: submit scans and retrieve results from the API."
-readme = "../README.md"
+readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
